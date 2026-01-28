@@ -17,8 +17,7 @@ import {
   Wallet,
   ArrowRight,
   Loader2,
-  AlertCircle,
-  DatabaseZap
+  AlertCircle
 } from 'lucide-react';
 
 // Firebase Imports
@@ -49,60 +48,25 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// CRITICAL: Ensure unique and stable pathing
+// Identificador estável do aplicativo
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'arkmeds-talent-hub-v1';
-
-// --- DADOS ORIGINAIS (BACKUP CONFORME SOLICITADO) ---
-const BACKUP_DATA = [
-  { nome: "MICAEL LEAL EVANGELISTA", squad: "Desenvolvimento Hardware", cargo: "ANALISTA DE FIRMWARE PLENO", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4686.02, custoReal: 8434.84, ultimaPromocao: "2024-07-01" },
-  { nome: "LIVIA OLIVEIRA BATISTA", squad: "Desenvolvimento MArk", cargo: "PRODUCT OWNER", modeloTrabalho: "PJ", senioridade: "Pleno", salario: 9642.00, custoReal: 9642.00, ultimaPromocao: "2025-02-03" },
-  { nome: "MARCELLA LUISA DE JESUS SOUSA", squad: "Desenvolvimento Hardware", cargo: "TECNICO EM MECANICA", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 3523.63, custoReal: 6342.53, ultimaPromocao: "2025-04-01" },
-  { nome: "JOREL MUSA DE NORONHA LEMES", squad: "Desenvolvimento MArk", cargo: "Desenvolvedor Pleno Unity", modeloTrabalho: "CLT", senioridade: "Pleno", salario: 5969.20, custoReal: 10744.56, ultimaPromocao: "2025-06-01" },
-  { nome: "PEDRO HENRIQUE LOPES VERISSIMO", squad: "Desenvolvimento Hardware", cargo: "ANALISTA DE HARDWARE", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 8418.64, ultimaPromocao: "2025-06-01" },
-  { nome: "NATHALIA SOUZA LIMA", squad: "Desenvolvimento CMMS", cargo: "ANALISTA DE QA JUNIOR", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 8418.64, ultimaPromocao: "2025-08-01" },
-  { nome: "ALLAN MARTINS MELQUIADES", squad: "Desenvolvimento Hardware", cargo: "ESTAGIARIO(A)", modeloTrabalho: "CLT", senioridade: "Estagiário", salario: 1350.00, custoReal: 1350.00, ultimaPromocao: "2025-09-01" },
-  { nome: "GABRIEL MELO", squad: "Desenvolvimento CMMS", cargo: "Dev Fullstack", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 4677.02, ultimaPromocao: "2025-10-21" },
-  { nome: "ROSANE SILVA FREITAS ARAUJO", squad: "Desenvolvimento CMMS", cargo: "PRODUCT OWNER", modeloTrabalho: "CLT", senioridade: "Pleno", salario: 6581.04, custoReal: 11845.87, ultimaPromocao: "2025-11-03" },
-  { nome: "HILARIO XAVIER MORAES DE MATTOS", squad: "Desenvolvimento Sppark", cargo: "ANALISTA DE BI JUNIOR", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 3523.62, custoReal: 6342.52, ultimaPromocao: "2025-11-03" },
-  { nome: "LUCAS HENRIQUE ASSUNCAO FERREIRA", squad: "Desenvolvimento MArk", cargo: "DESENVOLVEDOR JUNIOR UNITY", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 5156.42, custoReal: 9281.56, ultimaPromocao: "2025-11-03" },
-  { nome: "PATRICK MARTINS GONZAGA", squad: "Desenvolvimento Sppark", cargo: "ANALISTA DE QA JUNIOR", modeloTrabalho: "PJ", senioridade: "Júnior", salario: 6000.00, custoReal: 6000.00, ultimaPromocao: "2025-11-03" },
-  { nome: "VINICIUS CARDOSO ANTUNES", squad: "Desenvolvimento CMMS", cargo: "DESENVOLVEDOR PLENO", modeloTrabalho: "PJ", senioridade: "Pleno", salario: 6000.00, custoReal: 6000.00, ultimaPromocao: "2025-11-03" },
-  { nome: "JOAO ATHOS SILVA", squad: "Desenvolvimento Sppark", cargo: "Data Analyst", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 4677.02, ultimaPromocao: "2025-12-09" },
-  { nome: "ALBERTO MAGNO", squad: "Desenvolvimento Hardware", cargo: "Desenvolvedor Software Embarcado Junior", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 4677.02, ultimaPromocao: "2025-12-09" },
-  { nome: "LUCAS HENRIQUE DE ARAUJO CARDOSO", squad: "Desenvolvimento CMMS", cargo: "DESENVOLVEDOR JUNIOR", modeloTrabalho: "CLT", senioridade: "Pleno", salario: 5969.20, custoReal: 10744.56, ultimaPromocao: "2025-12-01" },
-  { nome: "JOÃO PRUDÊNCIO", squad: "Desenvolvimento ArkP", cargo: "Dev Frontend", modeloTrabalho: "PJ", senioridade: "Sênior", salario: 12000.00, custoReal: 12000.00, ultimaPromocao: "2026-01-05" },
-  { nome: "ARIANE SOUSA", squad: "Desenvolvimento CMMS", cargo: "Dev Fullstack", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 4677.02, ultimaPromocao: "2026-02-09" },
-  { nome: "GABRIEL COSTA BARBOSA LADEIA", squad: "Desenvolvimento Hardware", cargo: "ESTAGIARIO(A)", modeloTrabalho: "CLT", senioridade: "Estagiário", salario: 1350.00, custoReal: 1350.00, ultimaPromocao: "2026-02-09" },
-  { nome: "LAIS BOZZI", squad: "Desenvolvimento CMMS", cargo: "Designer", modeloTrabalho: "CLT", senioridade: "Pleno", salario: 5500.00, custoReal: 5500.00, ultimaPromocao: "2025-11-18" },
-  { nome: "CHARLIZE MOURA VIEIRA", squad: "Desenvolvimento Sppark", cargo: "ANALISTA DE BI JUNIOR", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 3523.62, custoReal: 6342.52, ultimaPromocao: "2026-01-05" },
-  { nome: "ANDRE LUIZ MORATO BARRETO", squad: "Desenvolvimento Hardware", cargo: "ANALISTA DE SOFTWARE", modeloTrabalho: "CLT", senioridade: "Júnior", salario: 4677.02, custoReal: 8418.64, ultimaPromocao: "" },
-  { nome: "DIDIMO PINTO DUARTE NETO", squad: "Desenvolvimento CMMS", cargo: "TECH LEAD", modeloTrabalho: "PJ", senioridade: "Lead", salario: 16759.16, custoReal: 16759.16, ultimaPromocao: "" },
-  { nome: "JOAO PEDRO MAIRINQUE DE AZEVEDO", squad: "Desenvolvimento ArkP", cargo: "DESENVOLVEDOR FRONT END", modeloTrabalho: "CLT", senioridade: "Pleno", salario: 9166.67, custoReal: 16500.01, ultimaPromocao: "" },
-  { nome: "KIVIO ANTUNES DE PAULA", squad: "Desenvolvimento Hardware", cargo: "SUPERVISOR HARDWARE", modeloTrabalho: "PJ", senioridade: "Sênior", salario: 17000.00, custoReal: 17000.00, ultimaPromocao: "2026-01-01" },
-  { nome: "RICARDO NEVES", squad: "Desenvolvimento ArkP", cargo: "PRODUCT OWNER", modeloTrabalho: "PJ", senioridade: "Pleno", salario: 9500.00, custoReal: 9500.00, ultimaPromocao: "2026-05-01" }
-];
 
 const SQUADS = [
   "Desenvolvimento Hardware",
   "Desenvolvimento MArk",
   "Desenvolvimento CMMS",
   "Desenvolvimento Sppark",
-  "Desenvolvimento ArkP",
-  "Arkweb (CMMS)",
-  "Embark",
-  "Mark II",
-  "Sppark"
+  "Desenvolvimento ArkP"
 ];
 
 const App = () => {
-  // --- States ---
+  // --- Estados ---
   const [view, setView] = useState('login'); 
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState(false);
   const [user, setUser] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [seedLoading, setSeedLoading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -114,33 +78,39 @@ const App = () => {
     modeloTrabalho: 'CLT',
     senioridade: 'Júnior',
     salario: '',
-    custoReal: '',
     ultimaPromocao: ''
   });
 
-  // --- 1. Autenticação Estrita (Regra 3) ---
+  // --- 1. Autenticação Robusta (Regra 3) ---
   useEffect(() => {
     const initAuth = async () => {
       try {
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+          try {
+            await signInWithCustomToken(auth, __initial_auth_token);
+          } catch (tokenErr) {
+            // Se falhar o token (mismatch), tenta anonimamente como fallback
+            await signInAnonymously(auth);
+          }
         } else {
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Erro auth:", err);
+        console.error("Erro crítico de auth:", err);
       }
     };
+    
     initAuth();
     const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
-  // --- 2. Sincronização Firestore (Regras 1 e 2) ---
+  // --- 2. Sincronização em Tempo Real (Regras 1 e 2) ---
   useEffect(() => {
-    if (!user) return; // Só busca se logado
+    if (!user) return;
 
     setLoading(true);
+    // Caminho estrito: /artifacts/{appId}/public/data/employees
     const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
     
     const unsubscribe = onSnapshot(colRef, 
@@ -150,7 +120,7 @@ const App = () => {
         setLoading(false);
       },
       (error) => {
-        console.error("Erro ao sincronizar Firestore:", error);
+        console.error("Erro Firestore:", error);
         setLoading(false);
       }
     );
@@ -169,20 +139,9 @@ const App = () => {
     }
   };
 
-  const runSeedData = async () => {
-    if (!user) return;
-    setSeedLoading(true);
-    try {
-      const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
-      for (const emp of BACKUP_DATA) {
-        await addDoc(colRef, { ...emp, createdAt: new Date().toISOString() });
-      }
-      alert("Carga inicial concluída com sucesso!");
-    } catch (e) {
-      console.error("Erro na carga:", e);
-      alert("Erro ao realizar carga inicial.");
-    }
-    setSeedLoading(false);
+  const handleLogout = () => {
+    setView('login');
+    setPassword('');
   };
 
   const openModal = (emp = null) => {
@@ -198,7 +157,6 @@ const App = () => {
         modeloTrabalho: 'CLT',
         senioridade: 'Júnior',
         salario: '',
-        custoReal: '',
         ultimaPromocao: ''
       });
     }
@@ -212,7 +170,6 @@ const App = () => {
     const data = { 
       ...formData, 
       salario: Number(formData.salario), 
-      custoReal: Number(formData.custoReal),
       updatedAt: new Date().toISOString()
     };
 
@@ -232,7 +189,7 @@ const App = () => {
 
   const deleteEmployee = async (id) => {
     if (!user) return;
-    if (window.confirm("Deseja excluir permanentemente este colaborador do banco de dados?")) {
+    if (window.confirm("Deseja excluir permanentemente este colaborador?")) {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
       } catch (err) {
@@ -241,12 +198,11 @@ const App = () => {
     }
   };
 
-  // --- Helpers ---
+  // --- Cálculos ---
   const stats = useMemo(() => {
     const total = employees.length;
     const sumSalario = employees.reduce((acc, curr) => acc + (curr.salario || 0), 0);
-    const sumCusto = employees.reduce((acc, curr) => acc + (curr.custoReal || 0), 0);
-    return { total, sumSalario, sumCusto };
+    return { total, sumSalario };
   }, [employees]);
 
   const filtered = employees.filter(e => 
@@ -255,6 +211,7 @@ const App = () => {
   );
 
   const formatCurrency = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  
   const formatDate = (s) => {
     if (!s) return "-";
     const parts = s.includes('-') ? s.split('-') : s.split('/');
@@ -273,7 +230,7 @@ const App = () => {
     </div>
   );
 
-  // --- Views ---
+  // --- Telas ---
   if (view === 'login') {
     return (
       <div className="min-h-screen bg-[#244C5A] flex items-center justify-center p-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
@@ -283,7 +240,7 @@ const App = () => {
           <div className="flex flex-col items-center mb-10">
             <ArkmedsLogo className="h-12 text-[#0097A9] mb-4" />
             <h2 className="text-2xl font-bold text-[#244C5A]">Admin Login</h2>
-            <p className="text-slate-400 text-sm">Proteção de Dados Arkmeds</p>
+            <p className="text-slate-400 text-sm">Painel Administrativo</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-6">
             <div className="relative">
@@ -297,7 +254,7 @@ const App = () => {
               />
             </div>
             <button type="submit" className="w-full bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-lg hover:brightness-95 transition-all">Acessar Sistema</button>
-            {loginError && <p className="text-red-500 text-center text-sm font-medium">Acesso negado. Senha incorreta.</p>}
+            {loginError && <p className="text-red-500 text-center text-sm font-medium">Senha incorreta.</p>}
           </form>
         </div>
       </div>
@@ -310,35 +267,22 @@ const App = () => {
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
         <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm">
           <ArkmedsLogo className="text-[#0097A9]" />
-          <div className="flex items-center gap-6">
-            <span className="text-[10px] bg-slate-100 px-3 py-1 rounded-full text-slate-400 font-bold uppercase tracking-widest">Database Linked</span>
-            <button onClick={() => setView('login')} className="text-slate-400 hover:text-red-500 flex items-center gap-2 font-bold transition-colors"><LogOut size={20}/> Sair</button>
-          </div>
+          <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 flex items-center gap-2 font-bold transition-colors"><LogOut size={20}/> Sair</button>
         </nav>
 
         <main className="max-w-6xl mx-auto p-10">
-          <div className="flex justify-between items-end mb-12">
-            <div>
-              <h1 className="text-4xl font-bold text-[#244C5A] mb-2">Painel de Controle</h1>
-              <p className="text-slate-500 text-lg">Gestão centralizada de talentos e custos Arkmeds.</p>
-            </div>
-            <button 
-              onClick={runSeedData}
-              disabled={seedLoading}
-              className="flex items-center gap-3 bg-[#0097A9] text-white px-6 py-3 rounded-2xl font-bold shadow-lg hover:brightness-95 disabled:opacity-50 transition-all"
-            >
-              {seedLoading ? <Loader2 className="animate-spin" /> : <DatabaseZap size={20} />}
-              Executar Carga Inicial
-            </button>
+          <div className="mb-12">
+            <h1 className="text-4xl font-bold text-[#244C5A] mb-2">Painel de Gestão</h1>
+            <p className="text-slate-500 text-lg">Administração de talentos Arkmeds.</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 mb-12">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
             <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-50 cursor-pointer hover:border-[#0097A9] transition-all group" onClick={() => setView('crud')}>
               <div className="w-16 h-16 bg-[#0097A9]/10 rounded-2xl flex items-center justify-center text-[#0097A9] mb-6 group-hover:scale-110 transition-transform">
                 <Users size={32} />
               </div>
               <h3 className="text-3xl font-bold text-[#244C5A]">{loading ? "..." : stats.total}</h3>
-              <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">Colaboradores</p>
+              <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">Colaboradores Cadastrados</p>
               <div className="mt-8 flex items-center text-[#0097A9] font-bold gap-2">Gerenciar Base <ArrowRight size={18}/></div>
             </div>
             
@@ -348,22 +292,13 @@ const App = () => {
                 <TrendingUp size={32} />
               </div>
               <h3 className="text-2xl font-bold">{loading ? "..." : formatCurrency(stats.sumSalario)}</h3>
-              <p className="text-white/50 font-bold uppercase text-xs tracking-widest">Folha Nominal Mensal</p>
-            </div>
-
-            <div className="bg-white p-8 rounded-3xl shadow-xl border-2 border-[#FFC72C]/20 relative overflow-hidden">
-               <div className="w-16 h-16 bg-[#FFC72C]/10 rounded-2xl flex items-center justify-center text-[#244C5A] mb-6">
-                <Briefcase size={32} />
-              </div>
-              <h3 className="text-2xl font-bold text-[#244C5A]">{loading ? "..." : formatCurrency(stats.sumCusto)}</h3>
-              <p className="text-slate-400 font-bold uppercase text-xs tracking-widest">Custo Real Arkmeds</p>
-              <div className="mt-4 text-[10px] text-slate-400 italic">Inclui impostos e encargos contratuais</div>
+              <p className="text-white/50 font-bold uppercase text-xs tracking-widest">Total da Folha Mensal</p>
             </div>
           </div>
 
           {loading && (
-            <div className="flex items-center justify-center p-12 gap-4 text-slate-400 font-medium">
-              <Loader2 className="animate-spin" /> Sincronizando dados com a nuvem...
+            <div className="flex items-center justify-center p-12 gap-4 text-slate-400 font-medium italic">
+              <Loader2 className="animate-spin" /> Sincronizando com a nuvem...
             </div>
           )}
         </main>
@@ -381,7 +316,7 @@ const App = () => {
             <button onClick={() => setView('home')} className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all shadow-inner"><LayoutDashboard/></button>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Base de Talentos</h1>
-              <p className="text-white/60">Modificações salvas em tempo real no banco de dados</p>
+              <p className="text-white/60">Registros sincronizados em tempo real</p>
             </div>
           </div>
           <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
@@ -421,8 +356,8 @@ const App = () => {
                   <th className="px-8 py-5">Colaborador</th>
                   <th className="px-8 py-5">Squad / Cargo</th>
                   <th className="px-8 py-5">Vínculo</th>
-                  <th className="px-8 py-5 text-right">Nominal</th>
-                  <th className="px-8 py-5 text-right">Custo Real</th>
+                  <th className="px-8 py-5 text-right">Salário Nominal</th>
+                  <th className="px-8 py-5 text-right">Última Promoção</th>
                   <th className="px-8 py-5 text-right">Ações</th>
                 </tr>
               </thead>
@@ -445,8 +380,8 @@ const App = () => {
                     <td className="px-8 py-5">
                       <span className={`text-[10px] font-bold px-2 py-1 rounded-md ${emp.modeloTrabalho === 'CLT' ? 'bg-[#0097A9]/10 text-[#0097A9]' : 'bg-[#FFC72C]/20 text-[#244C5A]'}`}>{emp.modeloTrabalho}</span>
                     </td>
-                    <td className="px-8 py-5 text-right font-medium text-slate-500 text-sm">{formatCurrency(emp.salario)}</td>
-                    <td className="px-8 py-5 text-right font-bold text-[#244C5A]">{formatCurrency(emp.custoReal)}</td>
+                    <td className="px-8 py-5 text-right font-bold text-[#244C5A]">{formatCurrency(emp.salario)}</td>
+                    <td className="px-8 py-5 text-right text-sm text-slate-500 italic">{formatDate(emp.ultimaPromocao)}</td>
                     <td className="px-8 py-5 text-right">
                       <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-all">
                         <button onClick={() => openModal(emp)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-[#0097A9]/10 rounded-lg transition-colors"><Edit3 size={18}/></button>
@@ -460,7 +395,7 @@ const App = () => {
                     <td colSpan="6" className="py-20 text-center">
                       <div className="flex flex-col items-center gap-4 text-slate-400">
                         <AlertCircle size={40} className="opacity-20" />
-                        <p className="font-medium italic">Nenhum dado encontrado no banco de dados.</p>
+                        <p className="font-medium italic">Base de dados vazia para este filtro.</p>
                       </div>
                     </td>
                   </tr>
@@ -471,7 +406,6 @@ const App = () => {
         </div>
       </div>
 
-      {/* MODAL / FORM */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
@@ -496,7 +430,7 @@ const App = () => {
                 <input required name="cargo" value={formData.cargo} onChange={e => setFormData({...formData, cargo: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none" />
               </div>
               <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Modelo de Contratação</label>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Contrato</label>
                 <select name="modeloTrabalho" value={formData.modeloTrabalho} onChange={e => setFormData({...formData, modeloTrabalho: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none">
                   <option value="CLT">CLT</option>
                   <option value="PJ">PJ</option>
@@ -512,23 +446,19 @@ const App = () => {
                   <option value="Lead">Lead</option>
                 </select>
               </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Salário Nominal (R$)</label>
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Salário Mensal (R$)</label>
                 <input required type="number" step="0.01" value={formData.salario} onChange={e => setFormData({...formData, salario: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none" />
               </div>
-              <div>
-                <label className="text-[10px] font-bold uppercase text-[#0097A9] block mb-2 tracking-widest">Custo Real Arkmeds (R$)</label>
-                <input required type="number" step="0.01" value={formData.custoReal} onChange={e => setFormData({...formData, custoReal: e.target.value})} className="w-full p-4 bg-[#0097A9]/5 border-2 border-[#0097A9]/20 rounded-2xl outline-none font-bold text-[#0097A9]" />
-              </div>
               <div className="col-span-2">
-                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Data da Última Promoção / Contratação</label>
+                <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2">Data da Última Promoção</label>
                 <input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none" />
               </div>
             </form>
 
             <div className="p-8 bg-slate-50 border-t flex gap-4">
-              <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-colors">Descartar</button>
-              <button onClick={handleSubmit} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all">Salvar no Banco de Dados</button>
+              <button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-colors">Cancelar</button>
+              <button onClick={handleSubmit} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all">Salvar Registro</button>
             </div>
           </div>
         </div>
