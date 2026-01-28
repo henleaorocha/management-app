@@ -17,12 +17,21 @@ import {
   Wallet,
   ArrowRight,
   Loader2,
-  AlertCircle
+  AlertCircle,
+  Mail
 } from 'lucide-react';
 
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup} from 'firebase/auth';
+import { 
+  getAuth, 
+  signInWithCustomToken, 
+  signInAnonymously, 
+  onAuthStateChanged, 
+  GoogleAuthProvider, 
+  signInWithPopup,
+  signOut
+} from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -30,11 +39,10 @@ import {
   setDoc, 
   addDoc, 
   deleteDoc, 
-  onSnapshot, 
-  query 
+  onSnapshot 
 } from 'firebase/firestore';
 
-// Firebase Configuration from environment
+// Firebase Configuration
 const firebaseConfig = {
   apiKey: "AIzaSyAWzofJhtiPHMV3wE51o_rLD7v09QEKSoQ",
   authDomain: "management-app-8d8a8.firebaseapp.com",
@@ -44,6 +52,7 @@ const firebaseConfig = {
   appId: "1:836040173534:web:2c8bf697e233c7111edf4f",
   measurementId: "G-4T91CHDF9X"
 };
+
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
@@ -62,11 +71,11 @@ const SQUADS = [
 const App = () => {
   // --- Estados ---
   const [view, setView] = useState('login'); 
-  const [password, setPassword] = useState('');
-  const [loginError, setLoginError] = useState(false);
   const [user, setUser] = useState(null);
+  const [loginError, setLoginError] = useState("");
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [authChecking, setAuthChecking] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
@@ -81,33 +90,51 @@ const App = () => {
     ultimaPromocao: ''
   });
 
-  // --- 1. Autenticação Robusta (Regra 3) ---
+  // --- 1. Ciclo de Autenticação Robusta ---
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Adicione esta verificação de fallback
+        // Fallback para ambiente de execução do Canvas
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+          await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
         } else {
-          // Se não houver token (como no seu localhost), ele usa o anônimo que você ativou
           await signInAnonymously(auth);
         }
       } catch (err) {
-        console.error("Erro crítico de auth:", err);
+        console.error("Auth init error:", err);
+      } finally {
+        setAuthChecking(false);
       }
     };
     
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      // Se houver um e-mail (login Google), verificamos a permissão
+      if (currentUser?.email) {
+        if (currentUser.email === 'hen.leao.rocha@gmail.com') {
+          setUser(currentUser);
+          setView('home');
+          setLoginError("");
+        } else {
+          // E-mail não autorizado
+          signOut(auth);
+          setLoginError("Acesso restrito: E-mail não autorizado.");
+          setView('login');
+        }
+      } else {
+        // Usuário anônimo ou deslogado
+        setUser(null);
+      }
+    });
     return () => unsubscribe();
   }, []);
 
-  // --- 2. Sincronização em Tempo Real (Regras 1 e 2) ---
+  // --- 2. Sincronização Firestore (Apenas se logado e autorizado) ---
   useEffect(() => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
 
     setLoading(true);
-    // Caminho estrito: /artifacts/{appId}/public/data/employees
     const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
     
     const unsubscribe = onSnapshot(colRef, 
@@ -117,7 +144,7 @@ const App = () => {
         setLoading(false);
       },
       (error) => {
-        console.error("Erro Firestore:", error);
+        console.error("Firestore sync error:", error);
         setLoading(false);
       }
     );
@@ -127,28 +154,20 @@ const App = () => {
 
   // --- Handlers ---
   const handleGoogleLogin = async () => {
-  const provider = new GoogleAuthProvider();
-  try {
-    const result = await signInWithPopup(auth, provider);
-    const userEmail = result.user.email;
-
-    // A TRAVA DE SEGURANÇA: Só permite o SEU e-mail
-    if (userEmail === 'hen.leao.rocha@gmail.com') {
-      setView('home');
-      setLoginError(false);
-    } else {
-      // Se for outro e-mail, desloga na hora
-      await auth.signOut();
-      setLoginError("Acesso restrito: E-mail não autorizado.");
+    const provider = new GoogleAuthProvider();
+    setLoginError("");
+    try {
+      await signInWithPopup(auth, provider);
+      // A lógica de verificação de e-mail está no onAuthStateChanged
+    } catch (error) {
+      console.error("Erro no login Google:", error);
+      setLoginError("Erro ao tentar conectar com Google.");
     }
-  } catch (error) {
-    console.error("Erro no login:", error);
-  }
-};
+  };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut(auth);
     setView('login');
-    setPassword('');
   };
 
   const openModal = (emp = null) => {
@@ -172,7 +191,7 @@ const App = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
 
     const data = { 
       ...formData, 
@@ -195,7 +214,7 @@ const App = () => {
   };
 
   const deleteEmployee = async (id) => {
-    if (!user) return;
+    if (!user || user.isAnonymous) return;
     if (window.confirm("Deseja excluir permanentemente este colaborador?")) {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
@@ -238,7 +257,7 @@ const App = () => {
   );
 
   // --- Telas ---
-  if (view === 'login') {
+  if (view === 'login' || authChecking) {
     return (
       <div className="min-h-screen bg-[#244C5A] flex items-center justify-center p-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
@@ -246,23 +265,31 @@ const App = () => {
           <div className="absolute top-0 right-0 w-32 h-32 bg-[#0097A9]/10 rounded-full -mr-16 -mt-16" />
           <div className="flex flex-col items-center mb-10">
             <ArkmedsLogo className="h-12 text-[#0097A9] mb-4" />
-            <h2 className="text-2xl font-bold text-[#244C5A]">Admin Login</h2>
-            <p className="text-slate-400 text-sm">Painel Administrativo</p>
+            <h2 className="text-2xl font-bold text-[#244C5A]">SSO Login</h2>
+            <p className="text-slate-400 text-sm text-center px-4">Utilize seu e-mail Google autorizado para acessar.</p>
           </div>
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div className="relative">
-              <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
-              <input 
-                type="password" 
-                placeholder="Senha de acesso" 
-                className={`w-full pl-12 pr-4 py-4 rounded-2xl border ${loginError ? 'border-red-500 bg-red-50' : 'border-slate-200'} focus:ring-2 focus:ring-[#0097A9] outline-none transition-all`}
-                value={password} 
-                onChange={e => setPassword(e.target.value)} 
-              />
-            </div>
-            <button type="submit" className="w-full bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-lg hover:brightness-95 transition-all">Acessar Sistema</button>
-            {loginError && <p className="text-red-500 text-center text-sm font-medium">Senha incorreta.</p>}
-          </form>
+          
+          <div className="space-y-6">
+            <button 
+              onClick={handleGoogleLogin}
+              disabled={authChecking}
+              className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-[#244C5A] font-bold py-4 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95 disabled:opacity-50"
+            >
+              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-6 h-6" />
+              Entrar com Google
+            </button>
+
+            {loginError && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium flex gap-2 items-center animate-in slide-in-from-top-2">
+                <AlertCircle size={18} />
+                {loginError}
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-10 text-center text-[10px] text-slate-300 font-bold uppercase tracking-widest">
+            Arkmeds Talent Hub Security
+          </div>
         </div>
       </div>
     );
@@ -274,7 +301,13 @@ const App = () => {
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
         <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm">
           <ArkmedsLogo className="text-[#0097A9]" />
-          <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 flex items-center gap-2 font-bold transition-colors"><LogOut size={20}/> Sair</button>
+          <div className="flex items-center gap-4">
+             <div className="hidden md:flex flex-col items-end mr-2">
+                <span className="text-xs font-bold text-[#244C5A]">{user?.displayName}</span>
+                <span className="text-[10px] text-slate-400 font-medium">{user?.email}</span>
+             </div>
+             <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 flex items-center gap-2 font-bold transition-colors"><LogOut size={20}/> Sair</button>
+          </div>
         </nav>
 
         <main className="max-w-6xl mx-auto p-10">
@@ -299,7 +332,7 @@ const App = () => {
                 <TrendingUp size={32} />
               </div>
               <h3 className="text-2xl font-bold">{loading ? "..." : formatCurrency(stats.sumSalario)}</h3>
-              <p className="text-white/50 font-bold uppercase text-xs tracking-widest">Total da Folha Mensal</p>
+              <p className="text-white/50 font-bold uppercase text-xs tracking-widest">Total da Folha Mensal (Nominal)</p>
             </div>
           </div>
 
@@ -320,40 +353,34 @@ const App = () => {
       <div className="bg-[#244C5A] text-white pt-10 pb-24 px-8 relative overflow-hidden">
         <div className="max-w-7xl mx-auto flex justify-between items-center relative z-10">
           <div className="flex items-center gap-6">
-            <button onClick={() => setView('home')} className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all shadow-inner"><LayoutDashboard/></button>
+            <button onClick={() => setView('home')} className="p-3 bg-white/10 hover:bg-white/20 rounded-2xl transition-all"><LayoutDashboard/></button>
             <div>
               <h1 className="text-3xl font-bold tracking-tight">Base de Talentos</h1>
               <p className="text-white/60">Registros sincronizados em tempo real</p>
             </div>
           </div>
-          <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-2">
-            <UserPlus size={20}/> Novo Registro
+          <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 transition-all flex items-center gap-2">
+            <UserPlus size={20}/> Novo Colaborador
           </button>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto -mt-12 px-8">
-        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 animate-in slide-in-from-bottom duration-500">
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
           <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
             <div className="relative w-1/3">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
               <input 
                 type="text" 
-                placeholder="Filtrar por nome ou squad..." 
+                placeholder="Buscar por nome ou squad..." 
                 className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl focus:ring-2 focus:ring-[#0097A9]/20 outline-none transition-all shadow-sm" 
                 value={searchTerm} 
                 onChange={e => setSearchTerm(e.target.value)} 
               />
             </div>
-            {loading ? (
-              <div className="flex items-center gap-2 text-[#0097A9] text-sm font-bold animate-pulse">
-                <Loader2 className="animate-spin" size={16}/> SINCRO...
-              </div>
-            ) : (
-              <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                {filtered.length} Colaboradores Ativos
-              </div>
-            )}
+            <div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              {loading ? "Sincronizando..." : `${filtered.length} Registros`}
+            </div>
           </div>
 
           <div className="overflow-x-auto">
@@ -402,7 +429,7 @@ const App = () => {
                     <td colSpan="6" className="py-20 text-center">
                       <div className="flex flex-col items-center gap-4 text-slate-400">
                         <AlertCircle size={40} className="opacity-20" />
-                        <p className="font-medium italic">Base de dados vazia para este filtro.</p>
+                        <p className="font-medium italic">Nenhum colaborador encontrado.</p>
                       </div>
                     </td>
                   </tr>
