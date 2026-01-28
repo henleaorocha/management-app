@@ -22,7 +22,7 @@ import {
 
 // Firebase Imports
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
+import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, GoogleAuthProvider, signInWithPopup} from 'firebase/auth';
 import { 
   getFirestore, 
   collection, 
@@ -126,15 +126,25 @@ const App = () => {
   }, [user]);
 
   // --- Handlers ---
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (password === 'admin123') {
+  const handleGoogleLogin = async () => {
+  const provider = new GoogleAuthProvider();
+  try {
+    const result = await signInWithPopup(auth, provider);
+    const userEmail = result.user.email;
+
+    // A TRAVA DE SEGURANÇA: Só permite o SEU e-mail
+    if (userEmail === 'hen.leao.rocha@gmail.com') {
       setView('home');
       setLoginError(false);
     } else {
-      setLoginError(true);
+      // Se for outro e-mail, desloga na hora
+      await auth.signOut();
+      setLoginError("Acesso restrito: E-mail não autorizado.");
     }
-  };
+  } catch (error) {
+    console.error("Erro no login:", error);
+  }
+};
 
   const handleLogout = () => {
     setView('login');
