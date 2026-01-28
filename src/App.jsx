@@ -85,14 +85,11 @@ const App = () => {
   useEffect(() => {
     const initAuth = async () => {
       try {
+        // Adicione esta verificação de fallback
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          try {
-            await signInWithCustomToken(auth, __initial_auth_token);
-          } catch (tokenErr) {
-            // Se falhar o token (mismatch), tenta anonimamente como fallback
-            await signInAnonymously(auth);
-          }
+          await signInWithCustomToken(auth, __initial_auth_token);
         } else {
+          // Se não houver token (como no seu localhost), ele usa o anônimo que você ativou
           await signInAnonymously(auth);
         }
       } catch (err) {
