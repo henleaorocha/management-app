@@ -66,10 +66,7 @@ import {
   setDoc, 
   addDoc, 
   deleteDoc, 
-  onSnapshot,
-  query,
-  where,
-  orderBy
+  onSnapshot 
 } from 'firebase/firestore';
 
 // Identifica se estamos no ambiente de Preview/Canvas
@@ -112,7 +109,6 @@ const SENTIMENTS = [
 ];
 
 const App = () => {
-  // --- Estados Gerais ---
   const [view, setView] = useState('login'); 
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState("");
@@ -121,16 +117,13 @@ const App = () => {
   const [authChecking, setAuthChecking] = useState(true);
   const [isPreviewBypass, setIsPreviewBypass] = useState(false);
   const [showSalaries, setShowSalaries] = useState(false);
-  
   const [cltChargePercent, setCltChargePercent] = useState(35);
   
-  // --- Estados de CRUD ---
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [sortConfig, setSortConfig] = useState({ key: 'nome', direction: 'asc' });
 
-  // --- Estados de 1:1 ---
   const [is1on1ModalOpen, setIs1on1ModalOpen] = useState(false);
   const [selectedEmpFor1on1, setSelectedEmpFor1on1] = useState(null);
   const [oneOnOnes, setOneOnOnes] = useState([]);
@@ -143,14 +136,7 @@ const App = () => {
   });
 
   const [formData, setFormData] = useState({
-    nome: '', 
-    email: '', 
-    cargo: '', 
-    modeloTrabalho: 'CLT', 
-    senioridade: 'Júnior', 
-    salario: '', 
-    ultimaPromocao: '', 
-    managerId: '',
+    nome: '', email: '', cargo: '', modeloTrabalho: 'CLT', senioridade: 'Júnior', salario: '', ultimaPromocao: '', managerId: '',
     allocations: [{ squad: SQUADS[0], percent: 100 }]
   });
 
@@ -162,7 +148,6 @@ const App = () => {
     return employees.find(e => e.email?.toLowerCase() === user?.email?.toLowerCase());
   }, [employees, user]);
 
-  // --- 1. Autenticação ---
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -174,7 +159,6 @@ const App = () => {
       } catch (err) { console.error(err); } finally { setAuthChecking(false); }
     };
     initAuth();
-
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       if (currentUser?.email) {
         setUser(currentUser);
@@ -188,7 +172,6 @@ const App = () => {
     return () => unsubscribe();
   }, [isPreviewBypass]);
 
-  // --- 2. Sincronização Funcionários ---
   useEffect(() => {
     if (!user) return; 
     setLoading(true);
@@ -201,7 +184,6 @@ const App = () => {
     return () => unsubscribe();
   }, [user]);
 
-  // --- 3. Sincronização 1:1s ---
   useEffect(() => {
     if (!user || !selectedEmpFor1on1) { setOneOnOnes([]); return; }
     setLoading1on1s(true);
@@ -217,7 +199,6 @@ const App = () => {
     return () => unsubscribe();
   }, [user, selectedEmpFor1on1]);
 
-  // --- Handlers ---
   const handleGoogleLogin = async () => {
     const provider = new GoogleAuthProvider();
     try { await signInWithPopup(auth, provider); } catch (err) { setLoginError("Erro no SSO."); }
@@ -244,8 +225,7 @@ const App = () => {
         managerId: emp.managerId || '',
         allocations: emp.allocations || [{ squad: emp.squad || SQUADS[0], percent: 100 }]
       }); 
-    }
-    else { 
+    } else { 
       setEditingEmployee(null); 
       setFormData({ 
         nome: '', email: '', cargo: '', modeloTrabalho: 'CLT', 
@@ -335,6 +315,13 @@ const App = () => {
     return [];
   }, [employees, isMaster, currentEmployeeProfile]);
 
+  const calculateRealCost = (salary, model) => {
+      if (model === 'CLT' || model === 'Estagiário') {
+          return salary * (1 + cltChargePercent / 100);
+      }
+      return salary;
+  };
+
   const sortedAndFilteredEmployees = useMemo(() => {
     let result = visibleEmployees.filter(e => {
         const matchesName = e.nome?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -353,13 +340,6 @@ const App = () => {
     return result;
   }, [visibleEmployees, searchTerm, sortConfig]);
 
-  const calculateRealCost = (salary, model) => {
-      if (model === 'CLT' || model === 'Estagiário') {
-          return salary * (1 + cltChargePercent / 100);
-      }
-      return salary;
-  };
-
   const stats = useMemo(() => {
     const total = visibleEmployees.length;
     const sumCLT = visibleEmployees.filter(e => e.modeloTrabalho === 'CLT').reduce((acc, curr) => acc + calculateRealCost(curr.salario || 0, curr.modeloTrabalho), 0);
@@ -370,11 +350,17 @@ const App = () => {
     const squadMap = {};
     visibleEmployees.forEach(e => {
         const fullCost = calculateRealCost(e.salario || 0, e.modeloTrabalho);
+        
+        // CORREÇÃO CRÍTICA: Se não houver array de alocações (registros antigos), usa o campo e.squad
         if (e.allocations && e.allocations.length > 0) {
             e.allocations.forEach(alloc => {
                 const share = (fullCost * (alloc.percent || 0)) / 100;
                 squadMap[alloc.squad] = (squadMap[alloc.squad] || 0) + share;
             });
+        } else if (e.squad) {
+            squadMap[e.squad] = (squadMap[e.squad] || 0) + fullCost;
+        } else {
+            squadMap['Não Atribuído'] = (squadMap['Não Atribuído'] || 0) + fullCost;
         }
     });
 
@@ -430,7 +416,6 @@ const App = () => {
     );
   };
 
-  // --- Views ---
   if (view === 'login' || authChecking) {
     return (
       <div className="min-h-screen bg-[#244C5A] flex items-center justify-center p-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
@@ -446,16 +431,26 @@ const App = () => {
             <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-[#244C5A] font-bold py-4 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95">
               <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-6 h-6" /> Entrar com Google
             </button>
-            
-            {/* O botão abaixo só aparece no ambiente de Preview */}
             {isPreviewEnv && (
                 <button onClick={handleBypass} className="w-full text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-[#0097A9] py-2 flex items-center justify-center gap-2 transition-all">
                   <FlaskConical size={12} /> Ignorar SSO (Bypass Preview)
                 </button>
             )}
-
             {loginError && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-xs text-center font-bold italic">{loginError}</div>}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isMaster && !currentEmployeeProfile && !loading) {
+    return (
+      <div className="min-h-screen bg-[#F8FAFB] flex items-center justify-center p-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+        <div className="bg-white p-12 rounded-3xl shadow-xl max-w-lg text-center border border-slate-100">
+           <AlertCircle className="mx-auto text-red-500 mb-6" size={64}/>
+           <h2 className="text-2xl font-bold text-[#244C5A] mb-4">Acesso não autorizado</h2>
+           <p className="text-slate-500 mb-8">O e-mail <strong>{user?.email}</strong> não está cadastrado como gestor na base Arkmeds.</p>
+           <button onClick={handleLogout} className="bg-[#244C5A] text-white px-8 py-3 rounded-xl font-bold">Voltar ao Login</button>
         </div>
       </div>
     );
@@ -577,10 +572,21 @@ const App = () => {
               <tbody className="divide-y divide-slate-100">
                 {sortedAndFilteredEmployees.map(emp => {
                   const manager = employees.find(e => e.id === emp.managerId);
-                  const allocations = emp.allocations || [{ squad: emp.squad, percent: 100 }];
+                  const allocations = (emp.allocations && emp.allocations.length > 0) 
+                    ? emp.allocations 
+                    : [{ squad: emp.squad || 'Não Atribuído', percent: 100 }];
                   return (
                     <tr key={emp.id} className="hover:bg-slate-50/80 transition-all group">
-                      <td className="px-8 py-5"><div className="flex items-center gap-4"><div className="w-10 h-10 bg-[#0097A9]/10 text-[#0097A9] rounded-xl flex items-center justify-center font-bold text-lg">{emp.nome?.charAt(0)}</div><div><p className="font-bold text-[#244C5A]">{emp.nome}</p><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{emp.senioridade} • {emp.modeloTrabalho}</p>{manager && <div className="flex items-center gap-1 text-[9px] text-[#0097A9] font-black uppercase tracking-tighter"><GitBranch size={10} /> Reporta a: {manager.nome}</div>}</div></div></td>
+                      <td className="px-8 py-5">
+                        <div className="flex items-center gap-4">
+                          <div className="w-10 h-10 bg-[#0097A9]/10 text-[#0097A9] rounded-xl flex items-center justify-center font-bold text-lg">{emp.nome?.charAt(0)}</div>
+                          <div>
+                            <p className="font-bold text-[#244C5A]">{emp.nome}</p>
+                            <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{emp.senioridade} • {emp.modeloTrabalho}</p>
+                            {manager && <div className="flex items-center gap-1 text-[9px] text-[#0097A9] font-black uppercase tracking-tighter"><GitBranch size={10} /> Reporta a: {manager.nome}</div>}
+                          </div>
+                        </div>
+                      </td>
                       <td className="px-8 py-5 text-sm">
                         <div className="space-y-1.5">
                             {allocations.map((a, i) => (
@@ -635,7 +641,7 @@ const App = () => {
         </div>
       )}
 
-      {/* MODAL FUNCIONÁRIO (MASTER ONLY) */}
+      {/* MODAL FUNCIONÁRIO */}
       {isModalOpen && isMaster && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden text-left border border-white/10">
@@ -654,36 +660,19 @@ const App = () => {
                     {formData.allocations.map((alloc, index) => (
                         <div key={index} className="flex items-center gap-3 animate-in slide-in-from-left duration-200">
                             <div className="flex-1">
-                                <select 
-                                    value={alloc.squad} 
-                                    onChange={e => updateAllocation(index, 'squad', e.target.value)}
-                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm"
-                                >
-                                    {SQUADS.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
+                                <select value={alloc.squad} onChange={e => updateAllocation(index, 'squad', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm">{SQUADS.map(s => <option key={s} value={s}>{s}</option>)}</select>
                             </div>
                             <div className="w-24 relative">
-                                <input 
-                                    type="number" 
-                                    value={alloc.percent} 
-                                    onChange={e => updateAllocation(index, 'percent', e.target.value)}
-                                    className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9]"
-                                />
-                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
+                                <input type="number" value={alloc.percent} onChange={e => updateAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9]"/><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
                             </div>
-                            {formData.allocations.length > 1 && (
-                                <button type="button" onClick={() => removeAllocation(index)} className="text-slate-300 hover:text-red-500"><MinusCircle size={20}/></button>
-                            )}
+                            {formData.allocations.length > 1 && (<button type="button" onClick={() => removeAllocation(index)} className="text-slate-300 hover:text-red-500"><MinusCircle size={20}/></button>)}
                         </div>
                     ))}
                 </div>
                 
                 <div className="mt-4 flex items-center justify-between border-t border-slate-200 pt-3">
                     <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total da Alocação</span>
-                    <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${formData.allocations.reduce((sum, a) => sum + a.percent, 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500 animate-pulse'}`}>
-                        <span className="text-sm font-black">{formData.allocations.reduce((sum, a) => sum + a.percent, 0)}%</span>
-                        {formData.allocations.reduce((sum, a) => sum + a.percent, 0) !== 100 && <AlertCircle size={14}/>}
-                    </div>
+                    <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${formData.allocations.reduce((sum, a) => sum + a.percent, 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500 animate-pulse'}`}><span className="text-sm font-black">{formData.allocations.reduce((sum, a) => sum + a.percent, 0)}%</span>{formData.allocations.reduce((sum, a) => sum + a.percent, 0) !== 100 && <AlertCircle size={14}/>}</div>
                 </div>
               </div>
 
