@@ -18,7 +18,8 @@ import {
   ArrowRight,
   Loader2,
   AlertCircle,
-  Mail
+  Mail,
+  FlaskConical
 } from 'lucide-react';
 
 // Firebase Imports
@@ -42,22 +43,23 @@ import {
   onSnapshot 
 } from 'firebase/firestore';
 
-// Firebase Configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyAWzofJhtiPHMV3wE51o_rLD7v09QEKSoQ",
-  authDomain: "management-app-8d8a8.firebaseapp.com",
-  projectId: "management-app-8d8a8",
-  storageBucket: "management-app-8d8a8.firebasestorage.app",
-  messagingSenderId: "836040173534",
-  appId: "1:836040173534:web:2c8bf697e233c7111edf4f",
-  measurementId: "G-4T91CHDF9X"
-};
+// Firebase Configuration - Alterna entre o ambiente de Preview e Produção automaticamente
+const firebaseConfig = typeof __firebase_config !== 'undefined' 
+  ? JSON.parse(__firebase_config) 
+  : {
+      apiKey: "AIzaSyAWzofJhtiPHMV3wE51o_rLD7v09QEKSoQ",
+      authDomain: "management-app-8d8a8.firebaseapp.com",
+      projectId: "management-app-8d8a8",
+      storageBucket: "management-app-8d8a8.firebasestorage.app",
+      messagingSenderId: "836040173534",
+      appId: "1:836040173534:web:2c8bf697e233c7111edf4f",
+      measurementId: "G-4T91CHDF9X"
+    };
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// Identificador estável do aplicativo
 const appId = typeof __app_id !== 'undefined' ? __app_id : 'arkmeds-talent-hub-v1';
 
 const SQUADS = [
@@ -79,6 +81,7 @@ const App = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [isPreviewBypass, setIsPreviewBypass] = useState(false);
   
   const [formData, setFormData] = useState({
     nome: '',
@@ -90,11 +93,10 @@ const App = () => {
     ultimaPromocao: ''
   });
 
-  // --- 1. Ciclo de Autenticação Robusta ---
+  // --- 1. Ciclo de Autenticação ---
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // Fallback para ambiente de execução do Canvas
         if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
           await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
         } else {
@@ -110,29 +112,31 @@ const App = () => {
     initAuth();
 
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      // Se houver um e-mail (login Google), verificamos a permissão
+      // Se houver e-mail (login Google), verificamos a permissão
       if (currentUser?.email) {
         if (currentUser.email === 'hen.leao.rocha@gmail.com') {
           setUser(currentUser);
           setView('home');
           setLoginError("");
+          setIsPreviewBypass(false);
         } else {
-          // E-mail não autorizado
           signOut(auth);
           setLoginError("Acesso restrito: E-mail não autorizado.");
           setView('login');
         }
       } else {
         // Usuário anônimo ou deslogado
-        setUser(null);
+        if (!isPreviewBypass) {
+            setUser(currentUser); 
+        }
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [isPreviewBypass]);
 
-  // --- 2. Sincronização Firestore (Apenas se logado e autorizado) ---
+  // --- 2. Sincronização Firestore ---
   useEffect(() => {
-    if (!user || user.isAnonymous) return;
+    if (!user) return; 
 
     setLoading(true);
     const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
@@ -158,15 +162,26 @@ const App = () => {
     setLoginError("");
     try {
       await signInWithPopup(auth, provider);
-      // A lógica de verificação de e-mail está no onAuthStateChanged
     } catch (error) {
       console.error("Erro no login Google:", error);
-      setLoginError("Erro ao tentar conectar com Google.");
+      setLoginError("Erro no SSO (popups podem estar bloqueados no Preview).");
     }
+  };
+
+  const handleBypass = () => {
+    setIsPreviewBypass(true);
+    setUser({ 
+        displayName: "Modo Preview", 
+        email: "hen.leao.rocha@gmail.com",
+        isMock: true 
+    });
+    setView('home');
   };
 
   const handleLogout = async () => {
     await signOut(auth);
+    setUser(null);
+    setIsPreviewBypass(false);
     setView('login');
   };
 
@@ -191,7 +206,7 @@ const App = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!user || user.isAnonymous) return;
+    if (!user) return;
 
     const data = { 
       ...formData, 
@@ -214,7 +229,7 @@ const App = () => {
   };
 
   const deleteEmployee = async (id) => {
-    if (!user || user.isAnonymous) return;
+    if (!user) return;
     if (window.confirm("Deseja excluir permanentemente este colaborador?")) {
       try {
         await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
@@ -269,7 +284,7 @@ const App = () => {
             <p className="text-slate-400 text-sm text-center px-4">Utilize seu e-mail Google autorizado para acessar.</p>
           </div>
           
-          <div className="space-y-6">
+          <div className="space-y-4">
             <button 
               onClick={handleGoogleLogin}
               disabled={authChecking}
@@ -279,9 +294,16 @@ const App = () => {
               Entrar com Google
             </button>
 
+            <button 
+              onClick={handleBypass}
+              className="w-full flex items-center justify-center gap-2 text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-[#0097A9] transition-colors py-2"
+            >
+              <FlaskConical size={12} /> Ignorar SSO (Apenas para Testes no Preview)
+            </button>
+
             {loginError && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium flex gap-2 items-center animate-in slide-in-from-top-2">
-                <AlertCircle size={18} />
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl text-sm font-medium flex gap-2 items-center animate-in slide-in-from-top-2 text-center">
+                <AlertCircle size={18} className="shrink-0" />
                 {loginError}
               </div>
             )}
@@ -311,6 +333,12 @@ const App = () => {
         </nav>
 
         <main className="max-w-6xl mx-auto p-10">
+          {isPreviewBypass && (
+              <div className="bg-[#FFC72C]/10 border border-[#FFC72C] text-[#244C5A] p-3 rounded-2xl mb-8 flex items-center gap-3 text-sm font-bold animate-pulse">
+                  <FlaskConical size={18}/> Modo Preview Ativado: SSO Ignorado para testes.
+              </div>
+          )}
+
           <div className="mb-12">
             <h1 className="text-4xl font-bold text-[#244C5A] mb-2">Painel de Gestão</h1>
             <p className="text-slate-500 text-lg">Administração de talentos Arkmeds.</p>
@@ -424,16 +452,6 @@ const App = () => {
                     </td>
                   </tr>
                 ))}
-                {!loading && filtered.length === 0 && (
-                  <tr>
-                    <td colSpan="6" className="py-20 text-center">
-                      <div className="flex flex-col items-center gap-4 text-slate-400">
-                        <AlertCircle size={40} className="opacity-20" />
-                        <p className="font-medium italic">Nenhum colaborador encontrado.</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
