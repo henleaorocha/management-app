@@ -72,8 +72,11 @@ import {
   orderBy
 } from 'firebase/firestore';
 
+// Identifica se estamos no ambiente de Preview/Canvas
+const isPreviewEnv = typeof __firebase_config !== 'undefined';
+
 // Firebase Configuration
-const firebaseConfig = typeof __firebase_config !== 'undefined' 
+const firebaseConfig = isPreviewEnv 
   ? JSON.parse(__firebase_config) 
   : {
       apiKey: "AIzaSyAWzofJhtiPHMV3wE51o_rLD7v09QEKSoQ",
@@ -148,7 +151,7 @@ const App = () => {
     salario: '', 
     ultimaPromocao: '', 
     managerId: '',
-    allocations: [{ squad: SQUADS[0], percent: 100 }] // Lista dinâmica de squads
+    allocations: [{ squad: SQUADS[0], percent: 100 }]
   });
 
   const TODAY_STR = "2026-01-29";
@@ -305,7 +308,6 @@ const App = () => {
     if (window.confirm("Remover 1:1?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', id));
   };
 
-  // --- Handlers para Alocações Múltiplas ---
   const addAllocation = () => {
       if (formData.allocations.length >= 5) return;
       setFormData({
@@ -325,7 +327,6 @@ const App = () => {
       setFormData({ ...formData, allocations: newList });
   };
 
-  // --- Lógica de Filtro por Permissão ---
   const visibleEmployees = useMemo(() => {
     if (isMaster) return employees;
     if (currentEmployeeProfile) {
@@ -338,8 +339,7 @@ const App = () => {
     let result = visibleEmployees.filter(e => {
         const matchesName = e.nome?.toLowerCase().includes(searchTerm.toLowerCase());
         const hasSquadInAllocations = e.allocations?.some(a => a.squad?.toLowerCase().includes(searchTerm.toLowerCase()));
-        const hasOldSquadField = e.squad?.toLowerCase().includes(searchTerm.toLowerCase()); // Para compatibilidade
-        return matchesName || hasSquadInAllocations || hasOldSquadField;
+        return matchesName || hasSquadInAllocations;
     });
 
     if (sortConfig.key) {
@@ -367,18 +367,14 @@ const App = () => {
     const sumEstagio = visibleEmployees.filter(e => e.modeloTrabalho === 'Estagiário').reduce((acc, curr) => acc + calculateRealCost(curr.salario || 0, curr.modeloTrabalho), 0);
     const totalPayroll = sumCLT + sumPJ + sumEstagio;
 
-    // Cálculo por Squad considerando RATEIO MÚLTIPLO
     const squadMap = {};
     visibleEmployees.forEach(e => {
         const fullCost = calculateRealCost(e.salario || 0, e.modeloTrabalho);
-        
         if (e.allocations && e.allocations.length > 0) {
             e.allocations.forEach(alloc => {
                 const share = (fullCost * (alloc.percent || 0)) / 100;
                 squadMap[alloc.squad] = (squadMap[alloc.squad] || 0) + share;
             });
-        } else if (e.squad) { // Compatibilidade com registros antigos
-            squadMap[e.squad] = (squadMap[e.squad] || 0) + fullCost;
         }
     });
 
@@ -450,7 +446,14 @@ const App = () => {
             <button onClick={handleGoogleLogin} className="w-full flex items-center justify-center gap-3 bg-white border border-slate-200 text-[#244C5A] font-bold py-4 rounded-2xl shadow-sm hover:bg-slate-50 transition-all active:scale-95">
               <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-6 h-6" /> Entrar com Google
             </button>
-            <button onClick={handleBypass} className="w-full text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-[#0097A9] py-2 flex items-center justify-center gap-2"><FlaskConical size={12} /> Ignorar SSO (Master)</button>
+            
+            {/* O botão abaixo só aparece no ambiente de Preview */}
+            {isPreviewEnv && (
+                <button onClick={handleBypass} className="w-full text-slate-400 text-[10px] font-bold uppercase tracking-widest hover:text-[#0097A9] py-2 flex items-center justify-center gap-2 transition-all">
+                  <FlaskConical size={12} /> Ignorar SSO (Bypass Preview)
+                </button>
+            )}
+
             {loginError && <div className="bg-red-50 text-red-600 p-4 rounded-xl text-xs text-center font-bold italic">{loginError}</div>}
           </div>
         </div>
@@ -601,10 +604,10 @@ const App = () => {
         </div>
       </div>
 
-      {/* MODAL 1:1 (OMITIDO PARA BREVIDADE, MAS MANTIDO NO CÓDIGO) */}
+      {/* MODAL 1:1 */}
       {is1on1ModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-          <div className="bg-white w-full max-w-4xl h-[90vh] rounded-[40px] shadow-2xl flex flex-col overflow-hidden border border-white/20 text-left">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-md p-4 animate-in fade-in duration-300 text-left">
+          <div className="bg-white w-full max-w-4xl h-[90vh] rounded-[40px] shadow-2xl flex flex-col overflow-hidden border border-white/20">
             <div className="bg-[#0097A9] p-8 flex justify-between items-start text-white shrink-0"><div><div className="flex items-center gap-2 text-[#FFC72C] mb-2 uppercase text-[10px] font-black tracking-[0.2em]"><Clock size={14}/> Performance</div><h2 className="text-3xl font-black">1:1 Histórico • {selectedEmpFor1on1?.nome}</h2></div><button onClick={() => setIs1on1ModalOpen(false)} className="bg-white/10 hover:bg-white/20 p-3 rounded-full transition-all"><X size={24}/></button></div>
             <div className="flex flex-1 overflow-hidden">
                <div className="w-1/2 border-r border-slate-100 flex flex-col bg-slate-50/30">
@@ -616,7 +619,7 @@ const App = () => {
                     })}
                   </div>
                </div>
-               <div className="w-1/2 overflow-y-auto bg-white p-10 text-left">
+               <div className="w-1/2 overflow-y-auto bg-white p-10">
                  {isAdding1on1 ? (
                    <form onSubmit={handleSubmit1on1} className="space-y-6 animate-in slide-in-from-right duration-300">
                      <h3 className="text-xl font-bold text-[#244C5A] flex items-center gap-2">{editing1on1Id ? 'Editar Sessão' : 'Registrar Conversa'}</h3>
@@ -634,14 +637,13 @@ const App = () => {
 
       {/* MODAL FUNCIONÁRIO (MASTER ONLY) */}
       {isModalOpen && isMaster && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden text-left border border-white/10">
             <div className="bg-[#0097A9] p-6 flex justify-between items-center text-white shrink-0"><h2 className="text-xl font-bold flex items-center gap-3 text-left"><UserPlus/> {editingEmployee ? 'Editar' : 'Novo'} Colaborador</h2><button onClick={() => setIsModalOpen(false)}><X/></button></div>
             <form onSubmit={handleSubmitEmployee} className="p-8 grid grid-cols-2 gap-6 max-h-[70vh] overflow-y-auto">
               <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Nome Completo</label><input required value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
               <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-[#0097A9] block mb-2 tracking-widest">E-mail Corporativo</label><input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full p-4 bg-[#0097A9]/5 border-2 border-[#0097A9]/10 rounded-2xl outline-none focus:border-[#0097A9]" placeholder="Para acesso de gestor..." /></div>
               
-              {/* ALOCAÇÕES MÚLTIPLAS */}
               <div className="col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100">
                 <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2"><Layers size={18} className="text-[#0097A9]"/><label className="text-[10px] font-black uppercase text-[#244C5A] tracking-widest">Alocação em Squads (Até 5)</label></div>
