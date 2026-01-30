@@ -234,7 +234,9 @@ const App = () => {
       setFormData({ 
         ...emp, 
         managerId: emp.managerId || '',
-        allocations: emp.allocations || [{ squad: emp.squad || SQUADS[0], percent: 100 }]
+        allocations: (emp.allocations && emp.allocations.length > 0) 
+            ? emp.allocations 
+            : [{ squad: emp.squad || SQUADS[0], percent: 100 }]
       }); 
     } else { 
       setEditingEmployee(null); 
@@ -331,7 +333,8 @@ const App = () => {
     let result = visibleEmployees.filter(e => {
         const matchesName = e.nome?.toLowerCase().includes(searchTerm.toLowerCase());
         const hasSquadInAllocations = e.allocations?.some(a => a.squad?.toLowerCase().includes(searchTerm.toLowerCase()));
-        return matchesName || hasSquadInAllocations;
+        const hasOldSquadField = e.squad?.toLowerCase().includes(searchTerm.toLowerCase());
+        return matchesName || hasSquadInAllocations || hasOldSquadField;
     });
     if (sortConfig.key) {
       result.sort((a, b) => {
@@ -350,19 +353,28 @@ const App = () => {
     const sumPJ = visibleEmployees.filter(e => e.modeloTrabalho === 'PJ').reduce((acc, curr) => acc + (curr.salario || 0), 0);
     const sumEstagio = visibleEmployees.filter(e => e.modeloTrabalho === 'Estagiário').reduce((acc, curr) => acc + calculateRealCost(curr.salario || 0, curr.modeloTrabalho), 0);
     const totalPayroll = sumCLT + sumPJ + sumEstagio;
+    
     const squadMap = {};
     visibleEmployees.forEach(e => {
         const fullCost = calculateRealCost(e.salario || 0, e.modeloTrabalho);
+        
+        // CORREÇÃO: Fallback para registros antigos que não possuem o array allocations
         if (e.allocations && e.allocations.length > 0) {
             e.allocations.forEach(alloc => {
                 const share = (fullCost * (alloc.percent || 0)) / 100;
                 squadMap[alloc.squad] = (squadMap[alloc.squad] || 0) + share;
             });
+        } else if (e.squad) {
+            squadMap[e.squad] = (squadMap[e.squad] || 0) + fullCost;
+        } else {
+            squadMap['Não Atribuído'] = (squadMap['Não Atribuído'] || 0) + fullCost;
         }
     });
+    
     const squadStats = Object.keys(squadMap).map(name => ({
         name, total: squadMap[name], percent: totalPayroll > 0 ? (squadMap[name] / totalPayroll) * 100 : 0
     })).sort((a, b) => b.total - a.total);
+    
     return { total, sumCLT, sumPJ, sumEstagio, totalPayroll, squadStats };
   }, [visibleEmployees, cltChargePercent]);
 
@@ -409,7 +421,8 @@ const App = () => {
     );
   };
 
-  // --- Views rendering logic ---
+  // --- Views rendering ---
+
   if (view === 'login' || authChecking) {
     return (
       <div className="min-h-screen bg-[#244C5A] flex items-center justify-center p-4" style={{ fontFamily: 'Montserrat, sans-serif' }}>
@@ -509,7 +522,7 @@ const App = () => {
                 </div>
                 <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
             </nav>
-            <main className="max-w-7xl mx-auto p-20 flex flex-col items-center justify-center min-h-[70vh] text-center">
+            <main className="max-w-7xl mx-auto p-20 flex flex-col items-center justify-center min-h-[70vh] text-center animate-in zoom-in-95 duration-500">
                 <div className="w-32 h-32 bg-slate-100 rounded-[40px] flex items-center justify-center text-slate-300 mb-8 border-4 border-dashed border-slate-200">
                     <TrendingUp size={64}/>
                 </div>
@@ -556,7 +569,7 @@ const App = () => {
       </div>
 
       <div className="max-w-7xl mx-auto -mt-12 px-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 animate-in slide-in-from-bottom duration-500">
             <div className="bg-white p-8 rounded-3xl shadow-xl border border-transparent">
               <Users className="text-[#0097A9] mb-6" size={32} />
               <h3 className="text-3xl font-bold text-[#244C5A]">{loading ? "..." : stats.total}</h3>
@@ -579,7 +592,7 @@ const App = () => {
             </div>
           </div>
 
-          <section className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 mb-12">
+          <section className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 mb-12 animate-in slide-in-from-bottom duration-700">
              <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-6">
                 <div>
                    <div className="flex items-center gap-2 text-[#0097A9] mb-1 uppercase text-[10px] font-black tracking-widest"><PieChart size={14}/> Orçamentos</div>
@@ -589,7 +602,7 @@ const App = () => {
                     <div className="flex items-center gap-3">
                         <div className="p-2 bg-[#0097A9]/10 rounded-xl text-[#0097A9]"><Percent size={18}/></div>
                         <div>
-                            <label className="block text-[9px] font-black text-slate-400 uppercase">Encargos CLT</label>
+                            <label className="block text-[9px] font-black text-slate-400 uppercase tracking-tighter">Encargos CLT</label>
                             <div className="flex items-center gap-2">
                                 <input type="number" value={cltChargePercent} onChange={(e) => setCltChargePercent(Number(e.target.value))} className="w-16 bg-transparent font-black text-[#244C5A] outline-none border-b-2 border-transparent focus:border-[#0097A9] transition-all text-sm"/>
                                 <span className="text-[#244C5A] font-bold text-sm">%</span>
@@ -613,7 +626,7 @@ const App = () => {
              </div>
           </section>
 
-        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100">
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 animate-in slide-in-from-bottom duration-1000">
           <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
             <div className="relative w-1/3"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Filtrar colaboradores..." className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl outline-none shadow-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
             <div className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">{sortedAndFilteredEmployees.length} REGISTROS</div>
@@ -669,8 +682,8 @@ const App = () => {
                    <form onSubmit={handleSubmit1on1} className="space-y-6 animate-in slide-in-from-right duration-300">
                      <h3 className="text-xl font-bold text-[#244C5A] flex items-center gap-2">{editing1on1Id ? 'Editar Sessão' : 'Registrar Conversa'}</h3>
                      <div className="grid grid-cols-2 gap-4"><div className="col-span-2"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Título</label><input required value={form1on1.titulo} onChange={e => setForm1on1({...form1on1, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div><div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Data</label><input type="date" required value={form1on1.data} onChange={e => setForm1on1({...form1on1, data: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9]"/></div><div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Sentimento</label><div className="flex justify-between bg-slate-50 p-2 rounded-2xl border border-slate-100">{SENTIMENTS.map(s => <button key={s.value} type="button" onClick={() => setForm1on1({...form1on1, sentimento: s.value})} className={`p-2 rounded-xl transition-all ${form1on1.sentimento === s.value ? `${s.bg} ${s.color} shadow-sm scale-110` : 'text-slate-300'}`}><s.icon size={20}/></button>)}</div></div></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Decisões</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="6" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Pauta Futura</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Decisões</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="6" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Pauta Futura</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
                      <button type="submit" className="w-full bg-[#244C5A] text-white font-bold py-5 rounded-3xl shadow-xl hover:bg-[#0097A9] transition-all flex items-center justify-center gap-2"><Save size={20}/> {editing1on1Id ? 'Atualizar' : 'Salvar'} Registro</button>
                    </form>
                  ) : <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center"><MessageSquare size={48} className="opacity-10 mb-4"/><p className="text-sm">Selecione uma sessão ou crie uma nova.</p></div>}
@@ -701,6 +714,7 @@ const App = () => {
               </div>
 
               <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-[#0097A9] flex items-center gap-2 mb-2 tracking-widest"><ShieldCheck size={14}/> Gestor Direto</label><select value={formData.managerId} onChange={e => setFormData({...formData, managerId: e.target.value})} disabled={!isMaster} className={`w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] ${!isMaster ? 'opacity-50 cursor-not-allowed' : ''}`}><option value="">Sem Gestor Direto</option>{employees.filter(e => e.id !== editingEmployee?.id).map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}</select></div>
+              
               <div className="col-span-2 grid grid-cols-2 gap-4">
                   <div>
                     <label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Cargo</label>
