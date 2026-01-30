@@ -229,7 +229,8 @@ const App = () => {
       setEditingEmployee(null); 
       setFormData({ 
         nome: '', email: '', cargo: '', modeloTrabalho: 'CLT', 
-        senioridade: 'Júnior', salario: '', ultimaPromocao: '', managerId: '',
+        senioridade: 'Júnior', salario: '', ultimaPromocao: '', 
+        managerId: isMaster ? '' : (currentEmployeeProfile?.id || ''),
         allocations: [{ squad: SQUADS[0], percent: 100 }]
       }); 
     }
@@ -251,7 +252,7 @@ const App = () => {
   };
 
   const deleteEmployee = async (id) => {
-    if (window.confirm("Excluir colaborador?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
+    if (window.confirm("Excluir colaborador? Isso é irreversível.")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
   };
 
   const open1on1History = (emp) => {
@@ -350,8 +351,6 @@ const App = () => {
     const squadMap = {};
     visibleEmployees.forEach(e => {
         const fullCost = calculateRealCost(e.salario || 0, e.modeloTrabalho);
-        
-        // CORREÇÃO CRÍTICA: Se não houver array de alocações (registros antigos), usa o campo e.squad
         if (e.allocations && e.allocations.length > 0) {
             e.allocations.forEach(alloc => {
                 const share = (fullCost * (alloc.percent || 0)) / 100;
@@ -359,8 +358,6 @@ const App = () => {
             });
         } else if (e.squad) {
             squadMap[e.squad] = (squadMap[e.squad] || 0) + fullCost;
-        } else {
-            squadMap['Não Atribuído'] = (squadMap['Não Atribuído'] || 0) + fullCost;
         }
     });
 
@@ -555,7 +552,7 @@ const App = () => {
           </div>
           <div className="flex items-center gap-4">
             <button onClick={() => setShowSalaries(!showSalaries)} className={`flex items-center gap-2 px-4 py-4 rounded-2xl font-bold transition-all ${showSalaries ? 'bg-[#FFC72C] text-[#244C5A]' : 'bg-white/10 text-white hover:bg-white/20'}`}>{showSalaries ? <Eye size={20}/> : <EyeOff size={20}/>} <span className="text-xs uppercase tracking-widest">{showSalaries ? "Ocultar" : "Mostrar"} Salários</span></button>
-            {isMaster && <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all">Novo Registro</button>}
+            <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all">Novo Registro</button>
           </div>
         </div>
       </div>
@@ -600,7 +597,17 @@ const App = () => {
                       </td>
                       <td className="px-8 py-5 text-right font-bold text-[#244C5A]">{formatCurrency(emp.salario)}</td>
                       <td className="px-8 py-5 text-right"><span className={`text-sm font-bold ${getMonthsSince(emp.ultimaPromocao) > 12 ? 'text-orange-500' : 'text-slate-700'}`}>{getMonthsSince(emp.ultimaPromocao)} meses</span></td>
-                      <td className="px-8 py-5 text-right"><div className="flex justify-end gap-1"><button onClick={() => open1on1History(emp)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-[#0097A9]/10 rounded-lg transition-all" title="Histórico de 1:1"><MessageSquare size={18}/></button>{isMaster && (<><button onClick={() => openModal(emp)} className="p-2 text-slate-400 hover:text-[#244C5A] hover:bg-slate-200 rounded-lg" title="Editar"><Edit3 size={18}/></button><button onClick={() => deleteEmployee(emp.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Excluir"><Trash2 size={18}/></button></>)}</div></td>
+                      <td className="px-8 py-5 text-right">
+                        <div className="flex justify-end gap-1">
+                          <button onClick={() => open1on1History(emp)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-[#0097A9]/10 rounded-lg transition-all" title="Histórico de 1:1"><MessageSquare size={18}/></button>
+                          {(isMaster || (currentEmployeeProfile && emp.managerId === currentEmployeeProfile.id)) && (
+                            <>
+                              <button onClick={() => openModal(emp)} className="p-2 text-slate-400 hover:text-[#244C5A] hover:bg-slate-200 rounded-lg" title="Editar"><Edit3 size={18}/></button>
+                              <button onClick={() => deleteEmployee(emp.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Excluir"><Trash2 size={18}/></button>
+                            </>
+                          )}
+                        </div>
+                      </td>
                     </tr>
                   );
                 })}
@@ -642,7 +649,7 @@ const App = () => {
       )}
 
       {/* MODAL FUNCIONÁRIO */}
-      {isModalOpen && isMaster && (
+      {isModalOpen && (isMaster || currentEmployeeProfile) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden text-left border border-white/10">
             <div className="bg-[#0097A9] p-6 flex justify-between items-center text-white shrink-0"><h2 className="text-xl font-bold flex items-center gap-3 text-left"><UserPlus/> {editingEmployee ? 'Editar' : 'Novo'} Colaborador</h2><button onClick={() => setIsModalOpen(false)}><X/></button></div>
@@ -663,7 +670,8 @@ const App = () => {
                                 <select value={alloc.squad} onChange={e => updateAllocation(index, 'squad', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm">{SQUADS.map(s => <option key={s} value={s}>{s}</option>)}</select>
                             </div>
                             <div className="w-24 relative">
-                                <input type="number" value={alloc.percent} onChange={e => updateAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9]"/><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
+                                <input type="number" value={alloc.percent} onChange={e => updateAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9]" />
+                                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span>
                             </div>
                             {formData.allocations.length > 1 && (<button type="button" onClick={() => removeAllocation(index)} className="text-slate-300 hover:text-red-500"><MinusCircle size={20}/></button>)}
                         </div>
@@ -676,11 +684,23 @@ const App = () => {
                 </div>
               </div>
 
-              <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-[#0097A9] flex items-center gap-2 mb-2 tracking-widest"><ShieldCheck size={14}/> Gestor Direto</label><select value={formData.managerId} onChange={e => setFormData({...formData, managerId: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]"><option value="">Sem Gestor Direto</option>{employees.filter(e => e.id !== editingEmployee?.id).map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}</select></div>
+              <div className="col-span-2">
+                <label className="text-[10px] font-bold uppercase text-[#0097A9] flex items-center gap-2 mb-2 tracking-widest"><ShieldCheck size={14}/> Gestor Direto</label>
+                <select 
+                    value={formData.managerId} 
+                    onChange={e => setFormData({...formData, managerId: e.target.value})} 
+                    disabled={!isMaster} // Apenas master muda hierarquia
+                    className={`w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] ${!isMaster ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                    <option value="">Sem Gestor Direto</option>
+                    {employees.filter(e => e.id !== editingEmployee?.id).map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                </select>
+              </div>
+
               <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Cargo</label><input required value={formData.cargo} onChange={e => setFormData({...formData, cargo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none" /></div>
-              <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Contrato</label><select value={formData.modeloTrabalho} onChange={e => setFormData({...formData, modeloTrabalho: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none"><option value="CLT">CLT</option><option value="PJ">PJ</option><option value="Estagiário">Estagiário</option></select></div>
+              <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Contrato</label><select value={formData.modeloTrabalho} onChange={e => setFormData({...formData, modeloTrabalho: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none"><option value="CLT">CLT</option><option value="PJ">PJ</option><option value="Estagiário">Estagiário</option></select></div>
               <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Senioridade</label><select value={formData.senioridade} onChange={e => setFormData({...formData, senioridade: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none"><option value="Estagiário">Estagiário</option><option value="Júnior">Júnior</option><option value="Pleno">Pleno</option><option value="Sênior">Sênior</option><option value="Lead">Lead</option></select></div>
-              <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Salário Mensal Nominal (R$)</label><input required type="number" step="0.01" value={formData.salario} onChange={e => setFormData({...formData, salario: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
+              <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Salário Nominal (R$)</label><input required type="number" step="0.01" value={formData.salario} onChange={e => setFormData({...formData, salario: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
               <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Data da Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
             </form>
             <div className="p-8 bg-slate-50 border-t flex gap-4"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + a.percent, 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30">Salvar Registro</button></div>
