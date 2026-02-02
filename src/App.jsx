@@ -50,7 +50,12 @@ import {
   ChevronLeft,
   ListFilter,
   CheckCircle2,
-  Circle
+  Circle,
+  DollarSign,
+  FileText,
+  Target,
+  BarChart3,
+  Globe2
 } from 'lucide-react';
 
 // Firebase Imports
@@ -106,6 +111,22 @@ const SQUADS = [
   "Desenvolvimento ArkP"
 ];
 
+const MONTHS = [
+  "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+  "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+];
+
+const BUDGET_STATUS = ["Orçado", "Realizado", "Cancelado", "Extra"];
+
+const DEPARTMENTS = ["ArkP", "CMMS", "Embark", "MArk", "Sppark"];
+
+const CURRENCIES = [
+  { value: 'BRL', label: 'Real (R$)', locale: 'pt-BR' },
+  { value: 'USD', label: 'Dólar ($)', locale: 'en-US' }
+];
+
+const FIXED_EXCHANGE_RATE = 5.5; // Cotação fixa solicitada
+
 const SENTIMENTS = [
   { value: 1, icon: Angry, color: 'text-red-600', bg: 'bg-red-50', label: 'Frustrado' },
   { value: 2, icon: Frown, color: 'text-orange-500', bg: 'bg-orange-50', label: 'Desmotivado' },
@@ -127,9 +148,27 @@ const App = () => {
   const [view, setView] = useState('login'); 
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState("");
+  
+  // States - Talent Hub
   const [employees, setEmployees] = useState([]);
   const [globalOneOnOnes, setGlobalOneOnOnes] = useState([]); 
   const [loading, setLoading] = useState(true);
+  
+  // States - Orçamento
+  const [budgetItems, setBudgetItems] = useState([]);
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
+  const [editingBudgetId, setEditingBudgetId] = useState(null);
+  const [budgetForm, setBudgetForm] = useState({
+    titulo: '',
+    selectedMonths: [],
+    status: 'Orçado',
+    valorPrevisto: '',
+    valorRealizado: '',
+    departamento: DEPARTMENTS[0],
+    moeda: 'BRL'
+  });
+
+  // Common States
   const [authChecking, setAuthChecking] = useState(true);
   const [isPreviewBypass, setIsPreviewBypass] = useState(false);
   const [showSalaries, setShowSalaries] = useState(false);
@@ -179,9 +218,10 @@ const App = () => {
     return s;
   };
 
-  const formatCurrency = (v) => {
-    if (!showSalaries) return "R$ ••••";
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  const formatCurrency = (v, currencyCode = 'BRL') => {
+    if (!showSalaries && view !== 'home') return `${currencyCode === 'USD' ? '$' : 'R$'} ••••`;
+    const locale = currencyCode === 'USD' ? 'en-US' : 'pt-BR';
+    return new Intl.NumberFormat(locale, { style: 'currency', currency: currencyCode }).format(v || 0);
   };
 
   const formatDate = (s) => {
@@ -265,6 +305,22 @@ const App = () => {
       return { relevantSessions, todaySessions };
   }, [globalOneOnOnes, visibleEmployees, TODAY_STR]);
 
+  const budgetStats = useMemo(() => {
+      let totalPrevisto = 0;
+      let totalRealizado = 0;
+
+      budgetItems.forEach(item => {
+          const vPrev = Number(item.valorPrevisto || 0);
+          const vReal = Number(item.valorRealizado || 0);
+          const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
+
+          totalPrevisto += vPrev * rate;
+          totalRealizado += vReal * rate;
+      });
+
+      return { totalPrevisto, totalRealizado };
+  }, [budgetItems]);
+
   // --- Firebase Effects ---
   useEffect(() => {
     const initAuth = async () => {
@@ -303,6 +359,16 @@ const App = () => {
     const unsubscribe = onSnapshot(colRef, (snapshot) => {
       const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setGlobalOneOnOnes(data);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'budget');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setBudgetItems(data.sort((a,b) => MONTHS.indexOf(a.mes) - MONTHS.indexOf(b.mes)));
     });
     return () => unsubscribe();
   }, [user]);
@@ -381,6 +447,97 @@ const App = () => {
     if (window.confirm("Excluir colaborador?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
   };
 
+  // --- Budget Handlers ---
+  const openBudgetModal = (item = null) => {
+    if (item) {
+        setEditingBudgetId(item.id);
+        setBudgetForm({
+            titulo: item.titulo,
+            selectedMonths: [item.mes], 
+            status: item.status,
+            valorPrevisto: item.valorPrevisto,
+            valorRealizado: item.valorRealizado,
+            departamento: item.departamento || DEPARTMENTS[0],
+            moeda: item.moeda || 'BRL'
+        });
+    } else {
+        setEditingBudgetId(null);
+        setBudgetForm({
+            titulo: '',
+            selectedMonths: [],
+            status: 'Orçado',
+            valorPrevisto: '',
+            valorRealizado: '',
+            departamento: DEPARTMENTS[0],
+            moeda: 'BRL'
+        });
+    }
+    setIsBudgetModalOpen(true);
+  };
+
+  const toggleBudgetMonth = (month) => {
+    if (editingBudgetId) {
+        setBudgetForm({...budgetForm, selectedMonths: [month]});
+    } else {
+        const current = [...budgetForm.selectedMonths];
+        if (current.includes(month)) {
+            setBudgetForm({...budgetForm, selectedMonths: current.filter(m => m !== month)});
+        } else {
+            setBudgetForm({...budgetForm, selectedMonths: [...current, month]});
+        }
+    }
+  };
+
+  const handleBudgetSubmit = async (e) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    if (budgetForm.selectedMonths.length === 0) return alert("Selecione pelo menos um mês.");
+
+    try {
+        if (editingBudgetId) {
+            // Update single item
+            const data = {
+                titulo: budgetForm.titulo,
+                mes: budgetForm.selectedMonths[0], 
+                status: budgetForm.status,
+                valorPrevisto: Number(budgetForm.valorPrevisto),
+                valorRealizado: Number(budgetForm.valorRealizado),
+                departamento: budgetForm.departamento,
+                moeda: budgetForm.moeda,
+                updatedAt: new Date().toISOString()
+            };
+            await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', editingBudgetId), data, { merge: true });
+        } else {
+            // Create multiple items (one for each selected month)
+            const batchPromises = budgetForm.selectedMonths.map(month => {
+                const data = {
+                    titulo: budgetForm.titulo,
+                    mes: month,
+                    status: budgetForm.status,
+                    valorPrevisto: Number(budgetForm.valorPrevisto),
+                    valorRealizado: Number(budgetForm.valorRealizado),
+                    departamento: budgetForm.departamento,
+                    moeda: budgetForm.moeda,
+                    createdAt: new Date().toISOString()
+                };
+                return addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), data);
+            });
+            await Promise.all(batchPromises);
+        }
+        setIsBudgetModalOpen(false);
+    } catch (err) {
+        console.error("Error saving budget:", err);
+    }
+  };
+
+  const deleteBudgetItem = async (id) => {
+      if (!auth.currentUser) return;
+      if (window.confirm("Remover item do orçamento?")) {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', id));
+      }
+  };
+
+  // --- 1:1 Handlers ---
   const open1on1History = (emp) => {
     setSelectedEmpFor1on1(emp);
     setIs1on1ModalOpen(true);
@@ -656,12 +813,212 @@ const App = () => {
 
   if (view === 'home' && (isMaster || isPreviewBypass)) {
       return (
-        <div className="min-h-screen bg-[#F8FAFB] text-left" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700">
+        <div className="min-h-screen bg-[#F8FAFB] text-left pb-20" style={{ fontFamily: 'Montserrat, sans-serif' }}>
+            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700 sticky top-0 z-30">
                 <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
-                <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
+                <div className="flex items-center gap-4">
+                    <button onClick={() => openBudgetModal()} className="bg-[#FFC72C] text-[#244C5A] px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-105 transition-all flex items-center gap-2"><PlusCircle size={18}/> Novo Item</button>
+                    <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
+                </div>
             </nav>
-            <main className="max-w-7xl mx-auto p-20 flex flex-col items-center justify-center min-h-[70vh] text-center animate-in zoom-in-95 duration-500"><div className="w-32 h-32 bg-slate-100 rounded-[40px] flex items-center justify-center text-slate-300 mb-8 border-4 border-dashed border-slate-200"><TrendingUp size={64}/></div><h1 className="text-4xl font-black text-[#244C5A] mb-4 text-center">Módulo de Orçamento</h1><p className="text-slate-400 text-lg max-w-md text-center text-left">Área reservada para o planejamento estratégico e financeiro.</p></main>
+            <main className="max-w-7xl mx-auto p-10">
+                <div className="bg-[#244C5A] text-white p-10 rounded-[40px] shadow-2xl mb-12 relative overflow-hidden">
+                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
+                        <div>
+                            <div className="flex items-center gap-3 text-[#FFC72C] mb-2 uppercase text-[10px] font-black tracking-widest"><TrendingUp size={16}/> Financeiro</div>
+                            <h1 className="text-4xl font-black mb-2">Gestão de Orçamento</h1>
+                            <p className="text-white/60">Acompanhamento de previsões e realizações mensais.</p>
+                        </div>
+                        <div className="flex gap-4">
+                            <div className="text-right">
+                                <p className="text-[10px] font-bold text-[#FFC72C] uppercase tracking-widest">Total Previsto (R$)</p>
+                                <p className="text-2xl font-black">{formatCurrency(budgetStats.totalPrevisto, 'BRL')}</p>
+                                {budgetStats.totalPrevisto > 0 && <p className="text-[10px] text-white/30 italic mt-1 font-bold">Consolidado @ 5.5</p>}
+                            </div>
+                            <div className="w-px bg-white/10"></div>
+                            <div className="text-right">
+                                <p className="text-[10px] font-bold text-[#0097A9] uppercase tracking-widest">Total Realizado (R$)</p>
+                                <p className="text-2xl font-black">{formatCurrency(budgetStats.totalRealizado, 'BRL')}</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
+                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                        <h3 className="font-bold text-[#244C5A] flex items-center gap-2"><ListFilter size={18}/> Itens do Orçamento</h3>
+                        <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{budgetItems.length} REGISTROS</div>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left text-slate-700">
+                            <thead>
+                                <tr className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest border-b">
+                                    <th className="px-6 py-4">Descrição</th>
+                                    <th className="px-6 py-4">Mês</th>
+                                    <th className="px-6 py-4">Depto.</th>
+                                    <th className="px-6 py-4 text-center">Status</th>
+                                    <th className="px-6 py-4 text-right">Valor Previsto</th>
+                                    <th className="px-6 py-4 text-right">Valor Realizado</th>
+                                    <th className="px-6 py-4 text-right">Saldo</th>
+                                    <th className="px-6 py-4 text-right">Ações</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                                {budgetItems.length === 0 ? (
+                                    <tr><td colSpan="8" className="p-12 text-center text-slate-400 italic">Nenhum item orçamentário cadastrado.</td></tr>
+                                ) : (
+                                    budgetItems.map(item => {
+                                        const saldo = (Number(item.valorRealizado || 0) - Number(item.valorPrevisto || 0));
+                                        return (
+                                        <tr key={item.id} className="hover:bg-slate-50/80 transition-all group">
+                                            <td className="px-6 py-4">
+                                                <div className="font-bold text-[#244C5A]">{item.titulo}</div>
+                                                <div className="text-[9px] font-bold text-slate-300 uppercase">ID: {item.id.slice(0,6)}</div>
+                                            </td>
+                                            <td className="px-6 py-4"><span className="text-xs font-bold bg-[#0097A9]/5 text-[#0097A9] px-3 py-1 rounded-lg">{item.mes}</span></td>
+                                            <td className="px-6 py-4">
+                                                <span className="text-[10px] font-black uppercase text-slate-400 border border-slate-200 px-2 py-0.5 rounded-md">{item.departamento || 'N/A'}</span>
+                                            </td>
+                                            <td className="px-6 py-4 text-center">
+                                                <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${
+                                                    item.status === 'Realizado' ? 'bg-emerald-100 text-emerald-700' :
+                                                    item.status === 'Cancelado' ? 'bg-red-50 text-red-500' :
+                                                    item.status === 'Extra' ? 'bg-purple-50 text-purple-600' :
+                                                    'bg-slate-100 text-slate-500'
+                                                }`}>{item.status}</span>
+                                            </td>
+                                            <td className="px-6 py-4 text-right font-medium text-slate-600">{formatCurrency(item.valorPrevisto, item.moeda)}</td>
+                                            <td className="px-6 py-4 text-right font-bold text-[#244C5A]">{formatCurrency(item.valorRealizado, item.moeda)}</td>
+                                            <td className={`px-6 py-4 text-right font-bold ${saldo > 0 ? 'text-red-500' : saldo < 0 ? 'text-emerald-500' : 'text-slate-300'}`}>
+                                                {formatCurrency(saldo, item.moeda)}
+                                            </td>
+                                            <td className="px-6 py-4 text-right">
+                                                <div className="flex justify-end gap-1">
+                                                    <button onClick={() => openBudgetModal(item)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-slate-100 rounded-lg"><Edit3 size={16}/></button>
+                                                    <button onClick={() => deleteBudgetItem(item.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    )})
+                                )}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </main>
+
+            {/* MODAL ORÇAMENTO */}
+            {isBudgetModalOpen && (
+                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
+                    <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden text-left border border-white/20 text-slate-700">
+                        <div className="bg-[#0097A9] p-8 flex justify-between items-center text-white">
+                            <h2 className="text-2xl font-black flex items-center gap-3"><Wallet/> {editingBudgetId ? 'Editar Item' : 'Novo Lançamento'}</h2>
+                            <button onClick={() => setIsBudgetModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={32}/></button>
+                        </div>
+                        <form onSubmit={handleBudgetSubmit} className="p-10 space-y-6">
+                            <div className="grid grid-cols-2 gap-6">
+                                <div className="col-span-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Título da Despesa</label>
+                                    <input required value={budgetForm.titulo} onChange={e => setBudgetForm({...budgetForm, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]" placeholder="Ex: Licença de Software" />
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Departamento</label>
+                                    <select value={budgetForm.departamento} onChange={e => setBudgetForm({...budgetForm, departamento: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
+                                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Moeda</label>
+                                    <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-200">
+                                        {CURRENCIES.map(c => (
+                                            <button 
+                                                key={c.value}
+                                                type="button"
+                                                onClick={() => setBudgetForm({...budgetForm, moeda: c.value})}
+                                                className={`flex-1 py-3 rounded-xl font-bold text-xs transition-all ${
+                                                    budgetForm.moeda === c.value
+                                                    ? 'bg-[#0097A9] text-white shadow-md'
+                                                    : 'text-slate-400 hover:text-slate-600'
+                                                }`}
+                                            >
+                                                {c.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Mês de Referência (Múltipla Seleção)</label>
+                                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                                    {MONTHS.map(m => (
+                                        <button 
+                                            key={m} 
+                                            type="button" 
+                                            onClick={() => toggleBudgetMonth(m)}
+                                            className={`text-[10px] font-bold uppercase py-2 rounded-xl transition-all border ${
+                                                budgetForm.selectedMonths.includes(m) 
+                                                ? 'bg-[#0097A9] text-white border-[#0097A9] shadow-md transform scale-105' 
+                                                : 'bg-white text-slate-400 border-slate-200 hover:border-[#0097A9] hover:text-[#0097A9]'
+                                            }`}
+                                        >
+                                            {m.substring(0, 3)}
+                                        </button>
+                                    ))}
+                                </div>
+                                {!editingBudgetId && <p className="text-[10px] text-slate-400 mt-2 italic">* Selecionar múltiplos meses criará itens individuais para cada mês.</p>}
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-6">
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Valor Previsto</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                                            {budgetForm.moeda === 'USD' ? '$' : 'R$'}
+                                        </span>
+                                        <input required type="number" step="0.01" value={budgetForm.valorPrevisto} onChange={e => setBudgetForm({...budgetForm, valorPrevisto: e.target.value})} className="w-full pl-10 pr-4 py-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-slate-700" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Valor Realizado</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
+                                            {budgetForm.moeda === 'USD' ? '$' : 'R$'}
+                                        </span>
+                                        <input type="number" step="0.01" value={budgetForm.valorRealizado} onChange={e => setBudgetForm({...budgetForm, valorRealizado: e.target.value})} className="w-full pl-10 pr-4 py-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]" />
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Status</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {BUDGET_STATUS.map(status => (
+                                        <button 
+                                            key={status} 
+                                            type="button" 
+                                            onClick={() => setBudgetForm({...budgetForm, status})}
+                                            className={`flex-1 py-3 rounded-2xl font-bold text-xs uppercase transition-all border ${
+                                                budgetForm.status === status
+                                                ? 'bg-[#FFC72C] text-[#244C5A] border-[#FFC72C] shadow-sm'
+                                                : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
+                                            }`}
+                                        >
+                                            {status}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl hover:bg-[#0097A9] transition-all flex items-center justify-center gap-2">
+                                <Save size={20}/> {editingBudgetId ? 'Atualizar Item' : 'Salvar Lançamentos'}
+                            </button>
+                        </form>
+                    </div>
+                </div>
+            )}
         </div>
       );
   }
