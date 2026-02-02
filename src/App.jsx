@@ -125,7 +125,79 @@ const CURRENCIES = [
   { value: 'USD', label: 'Dólar ($)', locale: 'en-US' }
 ];
 
-const FIXED_EXCHANGE_RATE = 5.5; // Cotação fixa solicitada
+const EXPENSE_TYPES = [
+  "Custos de Produção",
+  "Despesas Administrativas",
+  "Despesas Bancárias",
+  "Despesas com Equipe",
+  "Despesas com Manutenção",
+  "Despesas com Marketing",
+  "Despesas com P&D - Prototipação",
+  "Despesas Correntes",
+  "Despesas Financeiras",
+  "Despesas Operacionais",
+  "Investimentos Estratégicos"
+];
+
+const CATEGORIES = [
+  "13º Salário",
+  "Adiantamento",
+  "Assistência Médica - Coparticipação",
+  "Assistência Médica - Mensalidade",
+  "Assistência Odontológica",
+  "Assistência Psicológica",
+  "Bonificações",
+  "Brindes",
+  "Comissões",
+  "Compra de Serviços",
+  "Compras de Materia Prima",
+  "Compras Diversas para Revenda",
+  "Compras para Manutenção de Equipamentos",
+  "Compras para Prototipação",
+  "Comunicação",
+  "Confraternizações",
+  "Contratações",
+  "Cursos e Treinamentos",
+  "Despesas de Viagens",
+  "Despesas Diversas",
+  "Equipamentos de Informática",
+  "Equipamentos para Testes",
+  "Feiras e Eventos",
+  "Férias",
+  "FGTS",
+  "Fretes - Compras",
+  "Fretes - Correios",
+  "INSS + IRRF",
+  "Licenças de Software - Anual",
+  "Licenças de Software - Mensal",
+  "Locação de Veículos",
+  "Manutenção de Imobilizado",
+  "Máquinas e Equipamentos",
+  "Material de Uso e Consumo",
+  "Móveis e Utensílios",
+  "Multibenefícios",
+  "Nacionalização das Importações - Numérários",
+  "Outros Benefícios",
+  "Pensão Alimentícia",
+  "Plataformas Online",
+  "PLR",
+  "Prestador de Serviço - PJ",
+  "Publicidade Online",
+  "Reajustes Saláriais",
+  "Rescisões",
+  "Salários",
+  "Seguro de Vida",
+  "Seguros Diversos",
+  "Serviços de Calibração",
+  "Serviços de Hospedagem de Servidores",
+  "Serviços Gráficos",
+  "Telefonia",
+  "Transportes por Aplicativos (Uber, 99, Lalamove)",
+  "Vale Transporte",
+  "Visita à clientes locais"
+];
+
+const FIXED_EXCHANGE_RATE = 5.5; 
 
 const SENTIMENTS = [
   { value: 1, icon: Angry, color: 'text-red-600', bg: 'bg-red-50', label: 'Frustrado' },
@@ -160,12 +232,15 @@ const App = () => {
   const [editingBudgetId, setEditingBudgetId] = useState(null);
   const [budgetForm, setBudgetForm] = useState({
     titulo: '',
+    descricao: '', 
     selectedMonths: [],
     status: 'Orçado',
     valorPrevisto: '',
     valorRealizado: '',
-    departamento: DEPARTMENTS[0],
-    moeda: 'BRL'
+    moeda: 'BRL',
+    tipoDespesa: EXPENSE_TYPES[0],
+    categoria: CATEGORIES[0],
+    allocations: [{ department: DEPARTMENTS[0], percent: 100 }] // Novo campo para rateio
   });
 
   // Common States
@@ -451,25 +526,36 @@ const App = () => {
   const openBudgetModal = (item = null) => {
     if (item) {
         setEditingBudgetId(item.id);
+        // Garante que exista um array de alocações, mesmo se o item for antigo
+        const allocations = (item.allocations && item.allocations.length > 0) 
+            ? item.allocations 
+            : [{ department: item.departamento || DEPARTMENTS[0], percent: 100 }];
+
         setBudgetForm({
             titulo: item.titulo,
+            descricao: item.descricao || '', 
             selectedMonths: [item.mes], 
             status: item.status,
             valorPrevisto: item.valorPrevisto,
             valorRealizado: item.valorRealizado,
-            departamento: item.departamento || DEPARTMENTS[0],
-            moeda: item.moeda || 'BRL'
+            moeda: item.moeda || 'BRL',
+            tipoDespesa: item.tipoDespesa || EXPENSE_TYPES[0],
+            categoria: item.categoria || CATEGORIES[0],
+            allocations: allocations
         });
     } else {
         setEditingBudgetId(null);
         setBudgetForm({
             titulo: '',
+            descricao: '', 
             selectedMonths: [],
             status: 'Orçado',
             valorPrevisto: '',
             valorRealizado: '',
-            departamento: DEPARTMENTS[0],
-            moeda: 'BRL'
+            moeda: 'BRL',
+            tipoDespesa: EXPENSE_TYPES[0],
+            categoria: CATEGORIES[0],
+            allocations: [{ department: DEPARTMENTS[0], percent: 100 }]
         });
     }
     setIsBudgetModalOpen(true);
@@ -488,22 +574,46 @@ const App = () => {
     }
   };
 
+  // Handlers para alocação do Orçamento
+  const addBudgetAllocation = () => {
+    if (budgetForm.allocations.length >= 5) return;
+    setBudgetForm({ ...budgetForm, allocations: [...budgetForm.allocations, { department: DEPARTMENTS[0], percent: 0 }] });
+  };
+
+  const removeBudgetAllocation = (index) => {
+    const newList = budgetForm.allocations.filter((_, i) => i !== index);
+    setBudgetForm({ ...budgetForm, allocations: newList });
+  };
+
+  const updateBudgetAllocation = (index, field, value) => {
+    const newList = [...budgetForm.allocations];
+    newList[index][field] = field === 'percent' ? Number(value) : value;
+    setBudgetForm({ ...budgetForm, allocations: newList });
+  };
+
   const handleBudgetSubmit = async (e) => {
     e.preventDefault();
     if (!auth.currentUser) return;
     if (budgetForm.selectedMonths.length === 0) return alert("Selecione pelo menos um mês.");
+    
+    // Validação da soma das porcentagens
+    const totalPercent = budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0);
+    if (totalPercent !== 100) return alert("A alocação por departamentos deve somar 100%.");
 
     try {
         if (editingBudgetId) {
             // Update single item
             const data = {
                 titulo: budgetForm.titulo,
+                descricao: budgetForm.descricao,
                 mes: budgetForm.selectedMonths[0], 
                 status: budgetForm.status,
                 valorPrevisto: Number(budgetForm.valorPrevisto),
                 valorRealizado: Number(budgetForm.valorRealizado),
-                departamento: budgetForm.departamento,
+                allocations: budgetForm.allocations, // Salva o array de alocações
                 moeda: budgetForm.moeda,
+                tipoDespesa: budgetForm.tipoDespesa,
+                categoria: budgetForm.categoria,
                 updatedAt: new Date().toISOString()
             };
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', editingBudgetId), data, { merge: true });
@@ -512,12 +622,15 @@ const App = () => {
             const batchPromises = budgetForm.selectedMonths.map(month => {
                 const data = {
                     titulo: budgetForm.titulo,
+                    descricao: budgetForm.descricao,
                     mes: month,
                     status: budgetForm.status,
                     valorPrevisto: Number(budgetForm.valorPrevisto),
                     valorRealizado: Number(budgetForm.valorRealizado),
-                    departamento: budgetForm.departamento,
+                    allocations: budgetForm.allocations, // Salva o array de alocações
                     moeda: budgetForm.moeda,
+                    tipoDespesa: budgetForm.tipoDespesa,
+                    categoria: budgetForm.categoria,
                     createdAt: new Date().toISOString()
                 };
                 return addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), data);
@@ -869,6 +982,9 @@ const App = () => {
                                 ) : (
                                     budgetItems.map(item => {
                                         const saldo = (Number(item.valorRealizado || 0) - Number(item.valorPrevisto || 0));
+                                        const hasMultipleDepts = item.allocations && item.allocations.length > 1;
+                                        const mainDept = item.allocations && item.allocations.length > 0 ? item.allocations[0].department : (item.departamento || 'N/A');
+                                        
                                         return (
                                         <tr key={item.id} className="hover:bg-slate-50/80 transition-all group">
                                             <td className="px-6 py-4">
@@ -877,7 +993,9 @@ const App = () => {
                                             </td>
                                             <td className="px-6 py-4"><span className="text-xs font-bold bg-[#0097A9]/5 text-[#0097A9] px-3 py-1 rounded-lg">{item.mes}</span></td>
                                             <td className="px-6 py-4">
-                                                <span className="text-[10px] font-black uppercase text-slate-400 border border-slate-200 px-2 py-0.5 rounded-md">{item.departamento || 'N/A'}</span>
+                                                <span className={`text-[10px] font-black uppercase text-slate-400 border border-slate-200 px-2 py-0.5 rounded-md ${hasMultipleDepts ? 'bg-purple-50 text-purple-600 border-purple-100' : ''}`}>
+                                                    {hasMultipleDepts ? 'Rateio Múltiplo' : mainDept}
+                                                </span>
                                             </td>
                                             <td className="px-6 py-4 text-center">
                                                 <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${
@@ -922,11 +1040,46 @@ const App = () => {
                                     <input required value={budgetForm.titulo} onChange={e => setBudgetForm({...budgetForm, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]" placeholder="Ex: Licença de Software" />
                                 </div>
 
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Departamento</label>
-                                    <select value={budgetForm.departamento} onChange={e => setBudgetForm({...budgetForm, departamento: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
-                                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                                    </select>
+                                <div className="col-span-2">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Descrição Detalhada</label>
+                                    <textarea value={budgetForm.descricao} onChange={e => setBudgetForm({...budgetForm, descricao: e.target.value})} rows="2" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-sm text-slate-700 resize-none" placeholder="Detalhes adicionais sobre a despesa..." />
+                                </div>
+
+                                {/* COMPONENTE DE ALOCAÇÃO DE DEPARTAMENTOS */}
+                                <div className="col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left">
+                                    <div className="flex items-center justify-between mb-4 text-left text-slate-700">
+                                        <div className="flex items-center gap-2 text-left">
+                                            <Layers size={18} className="text-[#0097A9] text-left"/>
+                                            <label className="text-[10px] font-black uppercase text-[#244C5A] tracking-widest text-left">Departamentos (Max 5)</label>
+                                        </div>
+                                        <button type="button" onClick={addBudgetAllocation} disabled={budgetForm.allocations.length >= 5} className="text-[10px] font-black uppercase text-[#0097A9] hover:bg-[#0097A9]/10 px-3 py-1.5 rounded-xl disabled:opacity-30 text-left">+ Add Departamento</button>
+                                    </div>
+                                    <div className="space-y-3 text-left">
+                                        {budgetForm.allocations.map((alloc, index) => (
+                                            <div key={index} className="flex items-center gap-3 animate-in slide-in-from-left duration-200 text-left">
+                                                <div className="flex-1 text-left">
+                                                    <select value={alloc.department} onChange={e => updateBudgetAllocation(index, 'department', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm text-left text-slate-700">
+                                                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                                                    </select>
+                                                </div>
+                                                <div className="w-24 relative text-left">
+                                                    <input type="number" value={alloc.percent} onChange={e => updateBudgetAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9] text-left text-slate-700" />
+                                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 text-left">%</span>
+                                                </div>
+                                                {budgetForm.allocations.length > 1 && (
+                                                    <button type="button" onClick={() => removeBudgetAllocation(index)} className="text-slate-300 hover:text-red-500 text-left">
+                                                        <MinusCircle size={20} className="text-left"/>
+                                                    </button>
+                                                )}
+                                            </div>
+                                        ))}
+                                    </div>
+                                    <div className="mt-4 flex items-center justify-between border-t pt-3 text-left text-slate-700">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter text-left">Total</span>
+                                        <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'} text-left text-slate-700`}>
+                                            <span className="text-sm font-black text-left">{budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0)}%</span>
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div>
@@ -947,6 +1100,20 @@ const App = () => {
                                             </button>
                                         ))}
                                     </div>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Tipo de Despesa</label>
+                                    <select value={budgetForm.tipoDespesa} onChange={e => setBudgetForm({...budgetForm, tipoDespesa: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
+                                        {EXPENSE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Categoria</label>
+                                    <select value={budgetForm.categoria} onChange={e => setBudgetForm({...budgetForm, categoria: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
+                                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
                                 </div>
                             </div>
                             
@@ -1155,7 +1322,7 @@ const App = () => {
               </div>
               <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
             </form>
-            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-center">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-center">Salvar Registro</button></div>
+            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-left text-left">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-left text-left text-left">Salvar Registro</button></div>
           </div>
         </div>
       )}
