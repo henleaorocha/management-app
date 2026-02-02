@@ -82,7 +82,7 @@ const isPreviewEnv = typeof __firebase_config !== 'undefined';
 const firebaseConfig = isPreviewEnv 
   ? JSON.parse(__firebase_config) 
   : {
-      apiKey: "AIzaSyAWzofJhtiPHMV3wE51o_rLD7v09QEKSoQ",
+      apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
       authDomain: "management-app-8d8a8.firebaseapp.com",
       projectId: "management-app-8d8a8",
       storageBucket: "management-app-8d8a8.firebasestorage.app",
