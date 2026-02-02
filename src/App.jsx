@@ -114,8 +114,16 @@ const SENTIMENTS = [
   { value: 5, icon: Laugh, color: 'text-blue-500', bg: 'bg-blue-50', label: 'Muito Feliz' },
 ];
 
+// --- Componentes de UI ---
+const ArkmedsLogo = ({ className = "h-8" }) => (
+    <div className={`flex items-center gap-2 ${className}`}>
+        <div className="w-8 h-8 bg-[#0097A9] rounded-lg flex items-center justify-center text-white font-black text-xl">A</div>
+        <span className="font-black tracking-tighter text-xl text-inherit">ARKMEDS</span>
+    </div>
+);
+
 const App = () => {
-  // Views: 'login', 'welcome', 'selection', 'home' (Budget), 'crud' (Talent Hub), 'oneOnOnes' (Module)
+  // --- Estados ---
   const [view, setView] = useState('login'); 
   const [user, setUser] = useState(null);
   const [loginError, setLoginError] = useState("");
@@ -145,7 +153,7 @@ const App = () => {
     decisoes: '', 
     proximaPauta: '', 
     sentimento: 3, 
-    status: 'Agendada', // Status padrão
+    status: 'Agendada',
     data: new Date().toISOString().split('T')[0]
   });
 
@@ -154,213 +162,47 @@ const App = () => {
     allocations: [{ squad: SQUADS[0], percent: 100 }]
   });
 
+  // --- Constantes ---
   const TODAY_STR = new Date().toISOString().split('T')[0]; 
   const TODAY = new Date(TODAY_STR + "T00:00:00");
 
+  // --- Helpers ---
+  const getMonthsSince = (dateStr) => {
+    if (!dateStr) return 0;
+    const promoDate = new Date(dateStr + "T00:00:00");
+    if (isNaN(promoDate.getTime())) return 0;
+    return (TODAY.getFullYear() - promoDate.getFullYear()) * 12 + (TODAY.getMonth() - promoDate.getMonth());
+  };
+
+  const calculateRealCost = (salary, model) => {
+    const s = Number(salary) || 0;
+    if (model === 'CLT' || model === 'Estagiário') return s * (1 + Number(cltChargePercent) / 100);
+    return s;
+  };
+
+  const formatCurrency = (v) => {
+    if (!showSalaries) return "R$ ••••";
+    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  };
+
+  const formatDate = (s) => {
+    if (!s) return "-";
+    const p = s.split(s.includes('-') ? '-' : '/');
+    return p.length === 3 ? (p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : s) : s;
+  };
+
+  // --- Memos ---
   const isMaster = useMemo(() => user?.email?.toLowerCase() === MASTER_EMAIL.toLowerCase(), [user]);
+  
   const currentEmployeeProfile = useMemo(() => {
     return employees.find(e => e.email?.toLowerCase() === user?.email?.toLowerCase());
   }, [employees, user]);
-
-  // Autenticação
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
-        } else {
-          await signInAnonymously(auth);
-        }
-      } catch (err) { console.error("Firebase Auth Error:", err); } finally { setAuthChecking(false); }
-    };
-    initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) setView('welcome');
-      else if (!isPreviewBypass) setView('login');
-    });
-    return () => unsubscribe();
-  }, [isPreviewBypass]);
-
-  // Sync Funcionários
-  useEffect(() => {
-    if (!user) return; 
-    setLoading(true);
-    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
-    const unsubscribe = onSnapshot(colRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setEmployees(data);
-      setLoading(false);
-    });
-    return () => unsubscribe();
-  }, [user]);
-
-  // Sync Global 1:1s
-  useEffect(() => {
-    if (!user) return;
-    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes');
-    const unsubscribe = onSnapshot(colRef, (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setGlobalOneOnOnes(data);
-    });
-    return () => unsubscribe();
-  }, [user]);
-
-  // Filter specific 1:1s for modal
-  useEffect(() => {
-    if (!user || !selectedEmpFor1on1) { setSpecificOneOnOnes([]); return; }
-    setLoading1on1s(true);
-    const filtered = globalOneOnOnes
-        .filter(item => item.employeeId === selectedEmpFor1on1.id)
-        .sort((a, b) => new Date(b.data) - new Date(a.data));
-    setSpecificOneOnOnes(filtered);
-    setLoading1on1s(false);
-  }, [globalOneOnOnes, selectedEmpFor1on1]);
-
-  const handleGoogleLogin = async () => {
-    const provider = new GoogleAuthProvider();
-    try { await signInWithPopup(auth, provider); } catch (err) { setLoginError("Falha na autenticação."); }
-  };
-
-  const handleBypass = () => {
-    setIsPreviewBypass(true);
-    setUser({ displayName: "Admin Master", email: MASTER_EMAIL });
-    setView('welcome');
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-    setUser(null);
-    setIsPreviewBypass(false);
-    setView('login');
-  };
-
-  const handleEnterHub = () => {
-    if (isMaster || isPreviewBypass) setView('selection');
-    else setView('crud'); 
-  };
-
-  const openModal = (emp = null) => {
-    if (emp) { 
-      setEditingEmployee(emp); 
-      setFormData({ 
-          ...emp, 
-          managerId: emp.managerId || '', 
-          allocations: (emp.allocations && emp.allocations.length > 0) ? emp.allocations : [{ squad: emp.squad || SQUADS[0], percent: 100 }] 
-      }); 
-    } else { 
-      setEditingEmployee(null); 
-      setFormData({ 
-        nome: '', email: '', cargo: '', modeloTrabalho: 'CLT', senioridade: 'Júnior', salario: '', ultimaPromocao: '', 
-        managerId: (isMaster || isPreviewBypass) ? '' : (currentEmployeeProfile?.id || ''), allocations: [{ squad: SQUADS[0], percent: 100 }]
-      }); 
-    }
-    setIsModalOpen(true);
-  };
-
-  const handleSubmitEmployee = async (e) => {
-    e.preventDefault();
-    if (!auth.currentUser) return;
-    const data = { ...formData, salario: Number(formData.salario), updatedAt: new Date().toISOString() };
-    try {
-      if (editingEmployee) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', editingEmployee.id), data, { merge: true });
-      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'employees'), data);
-      setIsModalOpen(false);
-    } catch (err) { console.error(err); }
-  };
-
-  const deleteEmployee = async (id) => {
-    if (!auth.currentUser) return;
-    if (window.confirm("Excluir colaborador permanentemente?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
-  };
-
-  const open1on1History = (emp) => {
-    setSelectedEmpFor1on1(emp);
-    setIs1on1ModalOpen(true);
-    setIsAdding1on1(false);
-    setEditing1on1Id(null);
-  };
-
-  const handleStartNew1on1 = (emp = null) => {
-    const lastSession = emp ? globalOneOnOnes.filter(o => o.employeeId === emp.id).sort((a,b) => new Date(b.data) - new Date(a.data))[0] : null;
-    setForm1on1({
-      employeeId: emp?.id || '',
-      titulo: '', 
-      decisoes: lastSession?.proximaPauta || '', 
-      proximaPauta: '', 
-      sentimento: 3, 
-      status: 'Agendada',
-      data: new Date().toISOString().split('T')[0]
-    });
-    setEditing1on1Id(null);
-    setIsAdding1on1(true);
-    if (!selectedEmpFor1on1 && emp) setSelectedEmpFor1on1(emp);
-  };
-
-  const handleEdit1on1 = (session) => {
-    setForm1on1({ ...session });
-    setEditing1on1Id(session.id);
-    setIsAdding1on1(true);
-    if (!selectedEmpFor1on1) setSelectedEmpFor1on1(employees.find(e => e.id === session.employeeId));
-  };
-
-  const toggle1on1Status = async (id, currentStatus) => {
-      if (!auth.currentUser) return;
-      const newStatus = currentStatus === 'Finalizada' ? 'Agendada' : 'Finalizada';
-      try {
-          const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', id);
-          await updateDoc(docRef, { status: newStatus, updatedAt: new Date().toISOString() });
-      } catch (err) {
-          console.error("Erro ao atualizar status:", err);
-      }
-  };
-
-  const handleSubmit1on1 = async (e) => {
-    e.preventDefault();
-    if (!auth.currentUser) return;
-    const record = { ...form1on1, updatedAt: new Date().toISOString() };
-    try {
-      if (editing1on1Id) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', editing1on1Id), record, { merge: true });
-      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes'), { ...record, createdAt: new Date().toISOString() });
-      setIsAdding1on1(false);
-      setEditing1on1Id(null);
-    } catch (err) { console.error(err); }
-  };
-
-  const delete1on1 = async (id) => {
-    if (!auth.currentUser) return;
-    if (window.confirm("Remover este registro de 1:1?")) {
-        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', id)); }
-        catch (err) { console.error("Erro ao deletar 1:1:", err); }
-    }
-  };
-
-  const addAllocation = () => {
-      if (formData.allocations.length >= 5) return;
-      setFormData({ ...formData, allocations: [...formData.allocations, { squad: SQUADS[0], percent: 0 }] });
-  };
-
-  const removeAllocation = (index) => {
-      const newList = formData.allocations.filter((_, i) => i !== index);
-      setFormData({ ...formData, allocations: newList });
-  };
-
-  const updateAllocation = (index, field, value) => {
-      const newList = [...formData.allocations];
-      newList[index][field] = field === 'percent' ? Number(value) : value;
-      setFormData({ ...formData, allocations: newList });
-  };
 
   const visibleEmployees = useMemo(() => {
     if (isMaster || isPreviewBypass) return employees;
     if (currentEmployeeProfile) return employees.filter(e => e.managerId === currentEmployeeProfile.id);
     return [];
   }, [employees, isMaster, isPreviewBypass, currentEmployeeProfile]);
-
-  const calculateRealCost = (salary, model) => {
-      if (model === 'CLT' || model === 'Estagiário') return Number(salary) * (1 + Number(cltChargePercent) / 100);
-      return Number(salary);
-  };
 
   const sortedAndFilteredEmployees = useMemo(() => {
     let result = visibleEmployees.filter(e => 
@@ -371,6 +213,7 @@ const App = () => {
       result.sort((a, b) => {
         let aVal = sortConfig.key === 'mesesPromocao' ? getMonthsSince(a.ultimaPromocao) : a[sortConfig.key];
         let bVal = sortConfig.key === 'mesesPromocao' ? getMonthsSince(b.ultimaPromocao) : b[sortConfig.key];
+        if (typeof aVal === 'string') return sortConfig.direction === 'asc' ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
         return sortConfig.direction === 'asc' ? Number(aVal) - Number(bVal) : Number(bVal) - Number(aVal);
       });
     }
@@ -416,22 +259,179 @@ const App = () => {
       return { relevantSessions, todaySessions };
   }, [globalOneOnOnes, visibleEmployees, TODAY_STR]);
 
-  const getMonthsSince = (dateStr) => {
-    if (!dateStr) return 0;
-    const promoDate = new Date(dateStr + "T00:00:00");
-    if (isNaN(promoDate.getTime())) return 0;
-    return (TODAY.getFullYear() - promoDate.getFullYear()) * 12 + (TODAY.getMonth() - promoDate.getMonth());
+  // --- Firebase Effects ---
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          await signInWithCustomToken(auth, __initial_auth_token).catch(() => signInAnonymously(auth));
+        } else {
+          await signInAnonymously(auth);
+        }
+      } catch (err) { console.error("Firebase Auth Error:", err); } finally { setAuthChecking(false); }
+    };
+    initAuth();
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) setView('welcome');
+      else if (!isPreviewBypass) setView('login');
+    });
+    return () => unsubscribe();
+  }, [isPreviewBypass]);
+
+  useEffect(() => {
+    if (!user) return; 
+    setLoading(true);
+    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'employees');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setEmployees(data);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setGlobalOneOnOnes(data);
+    });
+    return () => unsubscribe();
+  }, [user]);
+
+  // --- Handlers ---
+  const handleGoogleLogin = async () => {
+    const provider = new GoogleAuthProvider();
+    try { await signInWithPopup(auth, provider); } catch (err) { setLoginError("Falha na autenticação."); }
   };
 
-  const formatCurrency = (v) => {
-    if (!showSalaries) return "R$ ••••";
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v || 0);
+  const handleBypass = () => {
+    setIsPreviewBypass(true);
+    setUser({ displayName: "Admin Master", email: MASTER_EMAIL });
+    setView('welcome');
   };
 
-  const formatDate = (s) => {
-    if (!s) return "-";
-    const p = s.split(s.includes('-') ? '-' : '/');
-    return p.length === 3 ? (p[0].length === 4 ? `${p[2]}/${p[1]}/${p[0]}` : s) : s;
+  const handleLogout = async () => {
+    await signOut(auth);
+    setUser(null);
+    setIsPreviewBypass(false);
+    setView('login');
+  };
+
+  const handleEnterHub = () => {
+    if (isMaster || isPreviewBypass) setView('selection');
+    else setView('crud'); 
+  };
+
+  const openModal = (emp = null) => {
+    if (emp) { 
+      setEditingEmployee(emp); 
+      setFormData({ 
+          ...emp, 
+          managerId: emp.managerId || '', 
+          allocations: (emp.allocations && emp.allocations.length > 0) ? emp.allocations : [{ squad: emp.squad || SQUADS[0], percent: 100 }] 
+      }); 
+    } else { 
+      setEditingEmployee(null); 
+      setFormData({ 
+        nome: '', email: '', cargo: '', modeloTrabalho: 'CLT', senioridade: 'Júnior', salario: '', ultimaPromocao: '', 
+        managerId: (isMaster || isPreviewBypass) ? '' : (currentEmployeeProfile?.id || ''), allocations: [{ squad: SQUADS[0], percent: 100 }]
+      }); 
+    }
+    setIsModalOpen(true);
+  };
+
+  const addAllocation = () => {
+    if (formData.allocations.length >= 5) return;
+    setFormData({ ...formData, allocations: [...formData.allocations, { squad: SQUADS[0], percent: 0 }] });
+  };
+
+  const removeAllocation = (index) => {
+    const newList = formData.allocations.filter((_, i) => i !== index);
+    setFormData({ ...formData, allocations: newList });
+  };
+
+  const updateAllocation = (index, field, value) => {
+    const newList = [...formData.allocations];
+    newList[index][field] = field === 'percent' ? Number(value) : value;
+    setFormData({ ...formData, allocations: newList });
+  };
+
+  const handleSubmitEmployee = async (e) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    const data = { ...formData, salario: Number(formData.salario), updatedAt: new Date().toISOString() };
+    try {
+      if (editingEmployee) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', editingEmployee.id), data, { merge: true });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'employees'), data);
+      setIsModalOpen(false);
+    } catch (err) { console.error(err); }
+  };
+
+  const deleteEmployee = async (id) => {
+    if (!auth.currentUser) return;
+    if (window.confirm("Excluir colaborador?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
+  };
+
+  const open1on1History = (emp) => {
+    setSelectedEmpFor1on1(emp);
+    setIs1on1ModalOpen(true);
+    setIsAdding1on1(false);
+    setEditing1on1Id(null);
+  };
+
+  const handleStartNew1on1 = (emp = null) => {
+    const lastSession = emp ? globalOneOnOnes.filter(o => o.employeeId === emp.id).sort((a,b) => new Date(b.data) - new Date(a.data))[0] : null;
+    setForm1on1({
+      employeeId: emp?.id || '',
+      titulo: '', 
+      decisoes: lastSession?.proximaPauta || '', 
+      proximaPauta: '', 
+      sentimento: 3, 
+      status: 'Agendada',
+      data: new Date().toISOString().split('T')[0]
+    });
+    setEditing1on1Id(null);
+    setIsAdding1on1(true);
+    if (!selectedEmpFor1on1 && emp) setSelectedEmpFor1on1(emp);
+  };
+
+  const handleEdit1on1 = (session) => {
+    setForm1on1({ ...session });
+    setEditing1on1Id(session.id);
+    setIsAdding1on1(true);
+    if (!selectedEmpFor1on1) setSelectedEmpFor1on1(employees.find(e => e.id === session.employeeId));
+  };
+
+  const toggle1on1Status = async (id, currentStatus) => {
+    if (!auth.currentUser) return;
+    const newStatus = currentStatus === 'Finalizada' ? 'Agendada' : 'Finalizada';
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', id);
+      await updateDoc(docRef, { status: newStatus, updatedAt: new Date().toISOString() });
+    } catch (err) { console.error("Erro ao atualizar status:", err); }
+  };
+
+  const handleSubmit1on1 = async (e) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    const record = { ...form1on1, updatedAt: new Date().toISOString() };
+    try {
+      if (editing1on1Id) await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', editing1on1Id), record, { merge: true });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes'), { ...record, createdAt: new Date().toISOString() });
+      setIsAdding1on1(false);
+      setEditing1on1Id(null);
+    } catch (err) { console.error(err); }
+  };
+
+  const delete1on1 = async (id) => {
+    if (!auth.currentUser) return;
+    if (window.confirm("Remover este registro de 1:1?")) {
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'oneOnOnes', id)); }
+        catch (err) { console.error("Erro ao deletar 1:1:", err); }
+    }
   };
 
   const SortableTh = ({ label, sortKey, align = 'left' }) => {
@@ -452,7 +452,7 @@ const App = () => {
     );
   };
 
-  // --- Views rendering logic ---
+  // --- Views ---
 
   if (view === 'login' || authChecking) {
     return (
@@ -497,22 +497,22 @@ const App = () => {
     return (
       <div className="min-h-screen bg-[#F8FAFB] flex flex-col items-center justify-center p-8 text-left animate-in slide-in-from-bottom-4 duration-500" style={{ fontFamily: 'Montserrat, sans-serif' }}>
         <div className="max-w-4xl w-full">
-            <div className="flex justify-between items-end mb-12">
-                <div><ArkmedsLogo className="text-[#0097A9] mb-6 h-10" /><h1 className="text-4xl font-black text-[#244C5A] mb-2">Olá, {user?.displayName?.split(' ')[0] || "Admin"}</h1><p className="text-slate-500 text-lg font-medium">Escolha uma frente de gestão:</p></div>
+            <div className="flex justify-between items-end mb-12 text-slate-700">
+                <div><ArkmedsLogo className="text-[#0097A9] mb-6 h-10" /><h1 className="text-4xl font-black text-[#244C5A] mb-2 text-left">Olá, {user?.displayName?.split(' ')[0] || "Admin"}</h1><p className="text-slate-500 text-lg font-medium text-left">Escolha uma frente de gestão:</p></div>
                 <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors flex items-center gap-2 mb-2"><LogOut size={20}/> Sair</button>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-slate-700">
                 <div onClick={() => setView('home')} className="bg-white p-12 rounded-[40px] shadow-xl border-2 border-transparent hover:border-[#FFC72C] transition-all cursor-pointer group hover:-translate-y-2 duration-300">
                     <div className="w-20 h-20 bg-[#FFC72C]/10 rounded-3xl flex items-center justify-center text-[#244C5A] mb-8 group-hover:rotate-12 transition-transform"><TrendingUp size={40} /></div>
-                    <h3 className="text-2xl font-black text-[#244C5A] mb-4">Gestão de Orçamento</h3>
-                    <p className="text-slate-400 leading-relaxed mb-8 text-sm">Área de planejamento estratégico financeiro e acompanhamento de fluxo de caixa corporativo.</p>
-                    <div className="flex items-center text-[#0097A9] font-black uppercase text-xs tracking-widest gap-2">Acessar Orçamento <ChevronRight size={16}/></div>
+                    <h3 className="text-2xl font-black text-[#244C5A] mb-4 text-left">Gestão de Orçamento</h3>
+                    <p className="text-slate-400 leading-relaxed mb-8 text-sm text-left">Área de planejamento estratégico financeiro e acompanhamento de fluxo de caixa corporativo.</p>
+                    <div className="flex items-center text-[#0097A9] font-black uppercase text-xs tracking-widest gap-2 text-left">Acessar Orçamento <ChevronRight size={16}/></div>
                 </div>
                 <div onClick={() => setView('crud')} className="bg-[#244C5A] p-12 rounded-[40px] shadow-xl border-2 border-transparent hover:border-[#0097A9] transition-all cursor-pointer group hover:-translate-y-2 duration-300 text-white">
                     <div className="w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center text-[#FFC72C] mb-8 group-hover:rotate-12 transition-transform"><Users size={40} /></div>
                     <h3 className="text-2xl font-black mb-4 text-left">Gestão de Pessoas</h3>
                     <p className="text-white/50 leading-relaxed mb-8 text-sm text-left">Controle de talentos, rateio por squad, provisionamento de encargos e agenda de 1:1.</p>
-                    <div className="flex items-center text-[#FFC72C] font-black uppercase text-xs tracking-widest gap-2">Entrar no Talent Hub <ChevronRight size={16}/></div>
+                    <div className="flex items-center text-[#FFC72C] font-black uppercase text-xs tracking-widest gap-2 text-left">Entrar no Talent Hub <ChevronRight size={16}/></div>
                 </div>
             </div>
         </div>
@@ -523,10 +523,10 @@ const App = () => {
   if (view === 'oneOnOnes') {
       return (
         <div className="min-h-screen bg-[#F8FAFB] text-left" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm">
+            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700">
                 <div className="flex items-center gap-6">
                     <ArkmedsLogo className="text-[#0097A9]" />
-                    <button onClick={() => setView('crud')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm transition-all bg-slate-50 px-4 py-2 rounded-xl"><ChevronLeft size={18}/> Voltar ao Talent Hub</button>
+                    <button onClick={() => setView('crud')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm transition-all bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Talent Hub</button>
                 </div>
                 <div className="flex items-center gap-4">
                     <button onClick={() => { setForm1on1({employeeId: '', titulo: '', decisoes: '', proximaPauta: '', sentimento: 3, status: 'Agendada', data: TODAY_STR}); setIsAdding1on1(true); }} className="bg-[#FFC72C] text-[#244C5A] px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-105 transition-all flex items-center gap-2"><PlusCircle size={18}/> Agendar Nova 1:1</button>
@@ -537,25 +537,21 @@ const App = () => {
                 <div className="lg:col-span-4 space-y-6">
                     <div className="bg-[#244C5A] p-8 rounded-[40px] text-white relative overflow-hidden shadow-2xl min-h-[400px]">
                         <div className="absolute top-0 right-0 p-4 opacity-10"><Clock size={100}/></div>
-                        <p className="text-[10px] font-black uppercase tracking-widest text-[#FFC72C] mb-2">Agenda de Hoje</p>
-                        <h2 className="text-3xl font-black mb-6">{formatDate(TODAY_STR)}</h2>
+                        <p className="text-[10px] font-black uppercase tracking-widest text-[#FFC72C] mb-2 text-left">Agenda de Hoje</p>
+                        <h2 className="text-3xl font-black mb-6 text-left">{formatDate(TODAY_STR)}</h2>
                         <div className="space-y-4 relative z-10">
                             {oneOnOneModuleData.todaySessions.length === 0 ? (
-                                <p className="text-white/40 italic text-sm">Nenhuma reunião para hoje.</p>
+                                <p className="text-white/40 italic text-sm text-left">Nenhuma reunião para hoje.</p>
                             ) : oneOnOneModuleData.todaySessions.map(s => {
                                 const emp = employees.find(e => e.id === s.employeeId);
                                 const isDone = s.status === 'Finalizada';
                                 return (
                                     <div key={s.id} className={`group bg-white/10 hover:bg-white/20 p-4 rounded-2xl border border-white/5 transition-all flex items-center justify-between ${isDone ? 'opacity-50' : ''}`}>
-                                        <div className="cursor-pointer flex-1" onClick={() => handleEdit1on1(s)}>
+                                        <div className="cursor-pointer flex-1 text-left" onClick={() => handleEdit1on1(s)}>
                                             <p className={`font-bold text-sm ${isDone ? 'line-through text-white/50' : ''}`}>{emp?.nome || 'Colaborador'}</p>
                                             <p className="text-[10px] text-white/50">{s.titulo}</p>
                                         </div>
-                                        <button 
-                                            onClick={() => toggle1on1Status(s.id, s.status)}
-                                            className={`p-2 rounded-xl transition-all ${isDone ? 'bg-[#FFC72C] text-[#244C5A]' : 'bg-white/10 text-white hover:bg-white/30'}`}
-                                            title={isDone ? "Reabrir reunião" : "Marcar como finalizada"}
-                                        >
+                                        <button onClick={() => toggle1on1Status(s.id, s.status)} className={`p-2 rounded-xl transition-all ${isDone ? 'bg-[#FFC72C] text-[#244C5A]' : 'bg-white/10 text-white hover:bg-white/30'}`}>
                                             {isDone ? <CheckCircle2 size={18}/> : <Circle size={18}/>}
                                         </button>
                                     </div>
@@ -565,35 +561,35 @@ const App = () => {
                     </div>
                 </div>
                 <div className="lg:col-span-8">
-                    <div className="bg-white p-10 rounded-[40px] shadow-xl border border-slate-100 min-h-[600px]">
+                    <div className="bg-white p-10 rounded-[40px] shadow-xl border border-slate-100 min-h-[600px] text-slate-700">
                         <div className="flex items-center justify-between mb-8">
-                            <h3 className="text-2xl font-black text-[#244C5A] flex items-center gap-3"><History className="text-[#0097A9]"/> Histórico Global</h3>
-                            <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest">{oneOnOneModuleData.relevantSessions.length} SESSÕES</div>
+                            <h3 className="text-2xl font-black text-[#244C5A] flex items-center gap-3 text-left"><History className="text-[#0097A9]"/> Histórico Global</h3>
+                            <div className="text-[10px] font-bold text-slate-300 uppercase tracking-widest text-left">{oneOnOneModuleData.relevantSessions.length} SESSÕES</div>
                         </div>
-                        <div className="space-y-4 text-slate-700">
+                        <div className="space-y-4">
                             {oneOnOneModuleData.relevantSessions.map(s => {
                                 const emp = employees.find(e => e.id === s.employeeId);
                                 const sent = SENTIMENTS.find(sent => sent.value === s.sentimento) || SENTIMENTS[2];
                                 const isDone = s.status === 'Finalizada';
                                 return (
-                                    <div key={s.id} className="group bg-slate-50/50 hover:bg-white border border-transparent hover:border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between">
-                                        <div className="flex items-center gap-6">
+                                    <div key={s.id} className="group bg-slate-50/50 hover:bg-white border border-transparent hover:border-slate-100 p-6 rounded-3xl transition-all flex items-center justify-between text-left">
+                                        <div className="flex items-center gap-6 text-left">
                                             <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm ${isDone ? 'bg-emerald-50 text-emerald-600' : 'bg-white text-[#0097A9]'}`}>
                                                 {isDone ? <CheckCircle2 size={24}/> : <sent.icon size={24}/>}
                                             </div>
-                                            <div>
-                                                <div className="flex items-center gap-2 mb-1">
+                                            <div className="text-left">
+                                                <div className="flex items-center gap-2 mb-1 text-left text-slate-700">
                                                     <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'}`}>{s.status || 'Agendada'}</span>
                                                     <span className="text-slate-300">•</span>
                                                     <span className="text-[10px] font-black text-[#0097A9] uppercase">{formatDate(s.data)}</span>
                                                     <span className="text-slate-300">•</span>
                                                     <span className="text-[10px] font-bold text-slate-400 uppercase">{emp?.nome}</span>
                                                 </div>
-                                                <h4 className={`font-bold text-[#244C5A] ${isDone ? 'line-through text-slate-400' : ''}`}>{s.titulo}</h4>
+                                                <h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{s.titulo}</h4>
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                                            <button onClick={() => toggle1on1Status(s.id, s.status)} className={`p-2 rounded-xl ${isDone ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-300 hover:bg-slate-100'}`} title="Alternar Status">
+                                        <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all text-left">
+                                            <button onClick={() => toggle1on1Status(s.id, s.status)} className={`p-2 rounded-xl ${isDone ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-300 hover:bg-slate-100'}`}>
                                                 {isDone ? <CheckCircle2 size={18}/> : <Circle size={18}/>}
                                             </button>
                                             <button onClick={() => handleEdit1on1(s)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-slate-100 rounded-xl"><Edit3 size={18}/></button>
@@ -610,40 +606,40 @@ const App = () => {
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
                     <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden text-left border border-white/20 text-slate-700">
                         <div className="bg-[#0097A9] p-8 flex justify-between items-center text-white">
-                            <h2 className="text-2xl font-black flex items-center gap-3"><MessageSquare/> {editing1on1Id ? 'Editar' : 'Agendar'} 1:1</h2>
+                            <h2 className="text-2xl font-black flex items-center gap-3 text-left"><MessageSquare/> {editing1on1Id ? 'Editar' : 'Agendar'} 1:1</h2>
                             <button onClick={() => setIsAdding1on1(false)} className="hover:rotate-90 transition-transform"><X size={32}/></button>
                         </div>
-                        <form onSubmit={handleSubmit1on1} className="p-10 space-y-6">
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="col-span-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Colaborador</label>
-                                    <select required value={form1on1.employeeId} onChange={e => setForm1on1({...form1on1, employeeId: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]">
+                        <form onSubmit={handleSubmit1on1} className="p-10 space-y-6 text-slate-700">
+                            <div className="grid grid-cols-2 gap-6 text-left">
+                                <div className="col-span-2 text-left">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Colaborador</label>
+                                    <select required value={form1on1.employeeId} onChange={e => setForm1on1({...form1on1, employeeId: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A] text-left">
                                         <option value="">Selecione o liderado...</option>
                                         {visibleEmployees.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
                                     </select>
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Título da Conversa</label>
-                                    <input required value={form1on1.titulo} onChange={e => setForm1on1({...form1on1, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold" />
+                                <div className="col-span-2 text-left">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Título da Conversa</label>
+                                    <input required value={form1on1.titulo} onChange={e => setForm1on1({...form1on1, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-left" />
                                 </div>
-                                <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Data</label><input type="date" required value={form1on1.data} onChange={e => setForm1on1({...form1on1, data: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]"/></div>
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Status</label>
-                                    <select value={form1on1.status} onChange={e => setForm1on1({...form1on1, status: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]">
+                                <div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Data</label><input type="date" required value={form1on1.data} onChange={e => setForm1on1({...form1on1, data: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left"/></div>
+                                <div className="text-left">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Status</label>
+                                    <select value={form1on1.status} onChange={e => setForm1on1({...form1on1, status: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A] text-left">
                                         <option value="Agendada">Agendada</option>
                                         <option value="Finalizada">Finalizada</option>
                                     </select>
                                 </div>
-                                <div className="col-span-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Sentimento</label>
-                                    <div className="flex justify-between bg-slate-50 p-2 rounded-2xl border border-slate-100">
+                                <div className="col-span-2 text-left">
+                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Sentimento</label>
+                                    <div className="flex justify-between bg-slate-50 p-2 rounded-2xl border border-slate-100 text-left">
                                         {SENTIMENTS.map(s => <button key={s.value} type="button" onClick={() => setForm1on1({...form1on1, sentimento: s.value})} className={`p-2 rounded-xl transition-all ${form1on1.sentimento === s.value ? `${s.bg} ${s.color} shadow-sm scale-110` : 'text-slate-300'}`}><s.icon size={20}/></button>)}
                                     </div>
                                 </div>
                             </div>
-                            <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Decisões e Notas</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none"></textarea></div>
-                            <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2">Próxima Pauta</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="2" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none" placeholder="O que discutir no próximo encontro?"></textarea></div>
-                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl flex items-center justify-center gap-2"><Save size={22}/> Salvar Registro</button>
+                            <div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Decisões e Notas</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none text-left"></textarea></div>
+                            <div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Próxima Pauta</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="2" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none text-left" placeholder="O que discutir no próximo encontro?"></textarea></div>
+                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl flex items-center justify-center gap-2 text-left"><Save size={22}/> Salvar Registro</button>
                         </form>
                     </div>
                 </div>
@@ -655,11 +651,11 @@ const App = () => {
   if (view === 'home' && (isMaster || isPreviewBypass)) {
       return (
         <div className="min-h-screen bg-[#F8FAFB] text-left" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm">
-                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
+            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700">
+                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
                 <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
             </nav>
-            <main className="max-w-7xl mx-auto p-20 flex flex-col items-center justify-center min-h-[70vh] text-center animate-in zoom-in-95 duration-500"><div className="w-32 h-32 bg-slate-100 rounded-[40px] flex items-center justify-center text-slate-300 mb-8 border-4 border-dashed border-slate-200"><TrendingUp size={64}/></div><h1 className="text-4xl font-black text-[#244C5A] mb-4">Módulo de Orçamento</h1><p className="text-slate-400 text-lg max-w-md">Área reservada para o planejamento estratégico e financeiro.</p></main>
+            <main className="max-w-7xl mx-auto p-20 flex flex-col items-center justify-center min-h-[70vh] text-center animate-in zoom-in-95 duration-500"><div className="w-32 h-32 bg-slate-100 rounded-[40px] flex items-center justify-center text-slate-300 mb-8 border-4 border-dashed border-slate-200"><TrendingUp size={64}/></div><h1 className="text-4xl font-black text-[#244C5A] mb-4 text-center">Módulo de Orçamento</h1><p className="text-slate-400 text-lg max-w-md text-center text-left">Área reservada para o planejamento estratégico e financeiro.</p></main>
         </div>
       );
   }
@@ -668,68 +664,68 @@ const App = () => {
     <div className="min-h-screen bg-[#F8FAFB] pb-20 text-left" style={{ fontFamily: 'Montserrat, sans-serif' }}>
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet" />
       <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700">
-          <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" />{(isMaster || isPreviewBypass) && (<button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl"><LayoutDashboard size={18}/> Menu Principal</button>)}</div>
+          <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" />{(isMaster || isPreviewBypass) && (<button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><LayoutDashboard size={18}/> Menu Principal</button>)}</div>
           <div className="flex items-center gap-4">
             <button onClick={() => setShowSalaries(!showSalaries)} className={`p-2 rounded-xl transition-all ${showSalaries ? 'bg-[#FFC72C] text-[#244C5A]' : 'bg-slate-100 text-slate-400'}`}>{showSalaries ? <Eye size={20}/> : <EyeOff size={20}/>}</button>
-            <div className="text-right hidden md:block"><p className="text-xs font-bold text-[#244C5A]">{user?.displayName || "Convidado"}</p><p className="text-[10px] text-slate-400 uppercase font-black">{isMaster ? "Acesso Master" : "Acesso Gestor"}</p></div>
+            <div className="text-right hidden md:block text-slate-700"><p className="text-xs font-bold text-[#244C5A]">{user?.displayName || "Convidado"}</p><p className="text-[10px] text-slate-400 uppercase font-black">{isMaster ? "Acesso Master" : "Acesso Gestor"}</p></div>
             <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
           </div>
         </nav>
 
-      <div className="bg-[#244C5A] text-white pt-10 pb-24 px-8">
-        <div className="max-w-7xl mx-auto flex justify-between items-center">
-          <h1 className="text-3xl font-black tracking-tight flex items-center gap-4"><Users size={32} className="text-[#FFC72C]"/> Talent Hub</h1>
-          <div className="flex items-center gap-4">
-              <button onClick={() => setView('oneOnOnes')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 transition-all border border-white/5"><MessageSquare size={20} className="text-[#FFC72C]"/> Agenda de 1:1s</button>
-              <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-3"><UserPlus size={20}/> Novo Registro</button>
+      <div className="bg-[#244C5A] text-white pt-10 pb-24 px-8 text-left">
+        <div className="max-w-7xl mx-auto flex justify-between items-center text-left">
+          <h1 className="text-3xl font-black tracking-tight flex items-center gap-4 text-left"><Users size={32} className="text-[#FFC72C]"/> Talent Hub</h1>
+          <div className="flex items-center gap-4 text-left">
+              <button onClick={() => setView('oneOnOnes')} className="bg-white/10 hover:bg-white/20 text-white px-8 py-4 rounded-2xl font-bold flex items-center gap-3 transition-all border border-white/5 text-left"><MessageSquare size={20} className="text-[#FFC72C] text-left"/> Agenda de 1:1s</button>
+              <button onClick={() => openModal()} className="bg-[#FFC72C] text-[#244C5A] px-8 py-4 rounded-2xl font-bold shadow-xl hover:scale-105 active:scale-95 transition-all flex items-center gap-3 text-left"><UserPlus size={20} text-left/> Novo Registro</button>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto -mt-12 px-8">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 animate-in slide-in-from-bottom duration-500 text-slate-700">
-            <div className="bg-white p-8 rounded-3xl shadow-xl border border-transparent"><Users className="text-[#0097A9] mb-6" size={32} /><h3 className="text-3xl font-bold text-[#244C5A]">{loading ? "..." : stats.total}</h3><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Colaboradores</p></div>
-            <div className="bg-[#0097A9] p-8 rounded-3xl shadow-xl text-white relative overflow-hidden flex flex-col justify-between"><div className="absolute top-0 right-0 p-4 opacity-10"><UserCheck size={80}/></div><TrendingUp className="text-[#FFC72C] mb-6" size={32} /><div><h3 className="text-2xl font-bold text-left">{loading ? "..." : formatCurrency(stats.sumCLT)}</h3><p className="text-white/50 font-bold uppercase text-[9px] tracking-widest text-left">Folha CLT (Prov.)</p></div></div>
-            <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 relative overflow-hidden flex flex-col justify-between"><div className="absolute top-0 right-0 p-4 opacity-5 text-[#244C5A]"><Building2 size={80}/></div><Wallet className="text-[#0097A9] mb-6" size={32} /><div><h3 className="text-2xl font-bold text-[#244C5A] text-left">{loading ? "..." : formatCurrency(stats.sumPJ)}</h3><p className="text-slate-400 font-bold uppercase text-[9px] tracking-widest text-left">Folha PJ (Real)</p></div></div>
-            <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 relative overflow-hidden flex flex-col justify-between"><div className="absolute top-0 right-0 p-4 opacity-5 text-[#244C5A]"><GraduationCap size={80}/></div><PlusCircle className="text-[#FFC72C] mb-6" size={32} /><div><h3 className="text-2xl font-bold text-[#244C5A] text-left">{loading ? "..." : formatCurrency(stats.sumEstagio)}</h3><p className="text-slate-400 font-bold uppercase text-[9px] tracking-widest text-left">Estágios (Prov.)</p></div></div>
+      <div className="max-w-7xl mx-auto -mt-12 px-8 text-left">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12 animate-in slide-in-from-bottom duration-500 text-slate-700 text-left">
+            <div className="bg-white p-8 rounded-3xl shadow-xl border border-transparent text-left"><Users className="text-[#0097A9] mb-6 text-left" size={32} /><h3 className="text-3xl font-bold text-[#244C5A] text-left">{loading ? "..." : stats.total}</h3><p className="text-slate-400 font-bold uppercase text-[10px] tracking-widest text-left">Colaboradores</p></div>
+            <div className="bg-[#0097A9] p-8 rounded-3xl shadow-xl text-white relative overflow-hidden flex flex-col justify-between text-left"><div className="absolute top-0 right-0 p-4 opacity-10 text-left"><UserCheck size={80} text-left/></div><TrendingUp className="text-[#FFC72C] mb-6 text-left" size={32} /><div><h3 className="text-2xl font-bold text-left">{loading ? "..." : formatCurrency(stats.sumCLT)}</h3><p className="text-white/50 font-bold uppercase text-[9px] tracking-widest text-left">Folha CLT (Prov.)</p></div></div>
+            <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 relative overflow-hidden flex flex-col justify-between text-left"><div className="absolute top-0 right-0 p-4 opacity-5 text-[#244C5A] text-left"><Building2 size={80} text-left/></div><Wallet className="text-[#0097A9] mb-6 text-left" size={32} /><div><h3 className="text-2xl font-bold text-[#244C5A] text-left">{loading ? "..." : formatCurrency(stats.sumPJ)}</h3><p className="text-slate-400 font-bold uppercase text-[9px] tracking-widest text-left">Folha PJ (Real)</p></div></div>
+            <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-100 relative overflow-hidden flex flex-col justify-between text-left"><div className="absolute top-0 right-0 p-4 opacity-5 text-[#244C5A] text-left"><GraduationCap size={80} text-left/></div><PlusCircle className="text-[#FFC72C] mb-6 text-left" size={32} /><div><h3 className="text-2xl font-bold text-[#244C5A] text-left">{loading ? "..." : formatCurrency(stats.sumEstagio)}</h3><p className="text-slate-400 font-bold uppercase text-[9px] tracking-widest text-left">Estágios (Prov.)</p></div></div>
           </div>
 
-          <section className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 mb-12 text-slate-700">
-             <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-6">
-                <div><div className="flex items-center gap-2 text-[#0097A9] mb-1 uppercase text-[10px] font-black tracking-widest"><PieChart size={14}/> Orçamentos</div><h2 className="text-2xl font-black text-[#244C5A]">Previsão Mensal por Squad</h2></div>
-                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center gap-6"><div className="flex items-center gap-3 text-left"><div className="p-2 bg-[#0097A9]/10 rounded-xl text-[#0097A9]"><Percent size={18}/></div><div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-tighter">Encargos CLT</label><div className="flex items-center gap-2"><input type="number" value={cltChargePercent} onChange={(e) => setCltChargePercent(Number(e.target.value))} className="w-16 bg-transparent font-black text-[#244C5A] outline-none border-b-2 border-transparent focus:border-[#0097A9] transition-all text-sm"/><span className="text-[#244C5A] font-bold text-sm">%</span></div></div></div><div className="w-px h-8 bg-slate-200" /><div className="text-left"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Total Provisionado</p><p className="text-lg font-black text-[#0097A9]">{formatCurrency(stats.totalPayroll)}</p></div></div>
+          <section className="bg-white p-10 rounded-[40px] shadow-2xl border border-slate-100 mb-12 text-slate-700 text-left">
+             <div className="flex flex-col md:flex-row items-start md:items-center justify-between mb-10 gap-6 text-left">
+                <div className="text-left"><div className="flex items-center gap-2 text-[#0097A9] mb-1 uppercase text-[10px] font-black tracking-widest text-left"><PieChart size={14}/> Orçamentos</div><h2 className="text-2xl font-black text-[#244C5A] text-left">Previsão Mensal por Squad</h2></div>
+                <div className="bg-slate-50 p-4 rounded-3xl border border-slate-100 flex items-center gap-6 text-left"><div className="flex items-center gap-3 text-left text-slate-700"><div className="p-2 bg-[#0097A9]/10 rounded-xl text-[#0097A9] text-left"><Percent size={18}/></div><div className="text-left"><label className="block text-[9px] font-black text-slate-400 uppercase tracking-tighter text-left">Encargos CLT</label><div className="flex items-center gap-2 text-left"><input type="number" value={cltChargePercent} onChange={(e) => setCltChargePercent(Number(e.target.value))} className="w-16 bg-transparent font-black text-[#244C5A] outline-none border-b-2 border-transparent focus:border-[#0097A9] transition-all text-sm text-left"/><span className="text-[#244C5A] font-bold text-sm text-left">%</span></div></div></div><div className="w-px h-8 bg-slate-200 text-left" /><div className="text-left"><p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter text-left">Total Provisionado</p><p className="text-lg font-black text-[#0097A9] text-left">{formatCurrency(stats.totalPayroll)}</p></div></div>
              </div>
-             <div className="space-y-6 max-w-5xl">
+             <div className="space-y-6 max-w-5xl text-left">
                    {stats.squadStats.map((s, idx) => (
-                      <div key={s.name} className="group"><div className="flex justify-between items-end mb-2"><div><span className="text-[9px] font-black text-slate-300 uppercase mr-2">0{idx + 1}</span><span className="text-sm font-bold text-[#244C5A] group-hover:text-[#0097A9] transition-colors">{s.name}</span></div><div className="text-right"><p className="text-xs font-black text-[#244C5A]">{formatCurrency(s.total)}</p><p className="text-[9px] font-bold text-[#FFC72C]">{s.percent.toFixed(1)}%</p></div></div><div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden"><div className="h-full bg-[#0097A9] rounded-full transition-all duration-1000 shadow-[0_0_8px_rgba(0,151,169,0.2)]" style={{ width: `${s.percent}%` }}/></div></div>
+                      <div key={s.name} className="group text-left"><div className="flex justify-between items-end mb-2 text-left"><div><span className="text-[9px] font-black text-slate-300 uppercase mr-2 text-left">0{idx + 1}</span><span className="text-sm font-bold text-[#244C5A] group-hover:text-[#0097A9] transition-colors text-left">{s.name}</span></div><div className="text-right text-left"><p className="text-xs font-black text-[#244C5A] text-left">{formatCurrency(s.total)}</p><p className="text-[9px] font-bold text-[#FFC72C] text-left">{s.percent.toFixed(1)}%</p></div></div><div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden text-left"><div className="h-full bg-[#0097A9] rounded-full transition-all duration-1000 shadow-[0_0_8px_rgba(0,151,169,0.2)] text-left" style={{ width: `${s.percent}%` }}/></div></div>
                    ))}
              </div>
           </section>
 
-        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 text-slate-700">
-          <div className="p-6 border-b flex justify-between items-center bg-slate-50/50">
-            <div className="relative w-1/3"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input type="text" placeholder="Filtrar colaboradores..." className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl outline-none shadow-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
-            <div className="text-[10px] font-bold text-slate-400 tracking-widest uppercase">{sortedAndFilteredEmployees.length} REGISTROS</div>
+        <div className="bg-white rounded-3xl shadow-2xl overflow-hidden border border-slate-100 text-slate-700 text-left">
+          <div className="p-6 border-b flex justify-between items-center bg-slate-50/50 text-left">
+            <div className="relative w-1/3 text-left"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-left" size={18} /><input type="text" placeholder="Filtrar colaboradores..." className="w-full pl-12 pr-4 py-3 bg-white border border-slate-200 rounded-2xl outline-none shadow-sm text-left text-slate-700" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} /></div>
+            <div className="text-[10px] font-bold text-slate-400 tracking-widest uppercase text-left">{sortedAndFilteredEmployees.length} REGISTROS</div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto text-left">
             <table className="w-full text-left text-slate-700">
-              <thead><tr className="bg-slate-50 text-[#244C5A] text-[10px] font-bold uppercase tracking-widest border-b"><SortableTh label="Colaborador" sortKey="nome" /><SortableTh label="Squads / Alocação" sortKey="squad" /><SortableTh label="Salário Nominal" sortKey="salario" align="right" /><SortableTh label="Meses s/ Promo" sortKey="mesesPromocao" align="right" /><th className="px-8 py-5 text-right">Ações</th></tr></thead>
-              <tbody className="divide-y divide-slate-100 text-slate-700">
+              <thead><tr className="bg-slate-50 text-[#244C5A] text-[10px] font-bold uppercase tracking-widest border-b text-left"><SortableTh label="Colaborador" sortKey="nome" /><SortableTh label="Squads / Alocação" sortKey="squad" /><SortableTh label="Salário Nominal" sortKey="salario" align="right" /><SortableTh label="Meses s/ Promo" sortKey="mesesPromocao" align="right" /><th className="px-8 py-5 text-right text-left">Ações</th></tr></thead>
+              <tbody className="divide-y divide-slate-100 text-slate-700 text-left">
                 {sortedAndFilteredEmployees.map(emp => {
                   const manager = employees.find(e => e.id === emp.managerId);
                   const allocations = (emp.allocations && emp.allocations.length > 0) ? emp.allocations : [{ squad: emp.squad || 'Sem Squad', percent: 100 }];
                   return (
-                    <tr key={emp.id} className="hover:bg-slate-50/80 transition-all group">
-                      <td className="px-8 py-5"><div className="flex items-center gap-4"><div className="w-10 h-10 bg-[#0097A9]/10 text-[#0097A9] rounded-xl flex items-center justify-center font-bold text-lg">{emp.nome?.charAt(0)}</div><div><p className="font-bold text-[#244C5A]">{emp.nome}</p><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{emp.senioridade} • {emp.modeloTrabalho}</p>{manager && <div className="flex items-center gap-1 text-[9px] text-[#0097A9] font-black uppercase tracking-tighter"><GitBranch size={10} /> Reporta a: {manager.nome}</div>}</div></div></td>
-                      <td className="px-8 py-5 text-sm"><div className="space-y-1.5">{allocations.map((a, i) => (<div key={i} className="flex items-center gap-2"><span className="text-[#0097A9] font-bold text-xs">{a.squad}</span><span className="text-slate-300 text-[9px] font-black">{a.percent}%</span></div>))}<p className="text-slate-500 text-[10px] italic pt-1 mt-1 line-clamp-1">{emp.cargo}</p></div></td>
-                      <td className="px-8 py-5 text-right font-bold text-[#244C5A]">{formatCurrency(emp.salario)}</td>
-                      <td className="px-8 py-5 text-right"><span className={`text-sm font-bold ${getMonthsSince(emp.ultimaPromocao) > 12 ? 'text-orange-500' : 'text-slate-700'}`}>{getMonthsSince(emp.ultimaPromocao)} meses</span></td>
-                      <td className="px-8 py-5 text-right"><div className="flex justify-end gap-1">
-                        <button onClick={() => open1on1History(emp)} className="p-2 text-slate-400 hover:text-[#0097A9] rounded-lg transition-all" title="Histórico de 1:1"><MessageSquare size={18}/></button>
+                    <tr key={emp.id} className="hover:bg-slate-50/80 transition-all group text-left text-slate-700">
+                      <td className="px-8 py-5 text-left"><div className="flex items-center gap-4 text-left"><div className="w-10 h-10 bg-[#0097A9]/10 text-[#0097A9] rounded-xl flex items-center justify-center font-bold text-lg text-left">{emp.nome?.charAt(0)}</div><div className="text-left"><p className="font-bold text-[#244C5A] text-left">{emp.nome}</p><p className="text-[10px] text-slate-400 font-bold uppercase mb-1 text-left">{emp.senioridade} • {emp.modeloTrabalho}</p>{manager && <div className="flex items-center gap-1 text-[9px] text-[#0097A9] font-black uppercase tracking-tighter text-left"><GitBranch size={10} text-left/> Reporta a: {manager.nome}</div>}</div></div></td>
+                      <td className="px-8 py-5 text-sm text-left"><div className="space-y-1.5 text-left">{allocations.map((a, i) => (<div key={i} className="flex items-center gap-2 text-left"><span className="text-[#0097A9] font-bold text-xs text-left">{a.squad}</span><span className="text-slate-300 text-[9px] font-black text-left">{a.percent}%</span></div>))}<p className="text-slate-500 text-[10px] italic pt-1 mt-1 line-clamp-1 text-left">{emp.cargo}</p></div></td>
+                      <td className="px-8 py-5 text-right font-bold text-[#244C5A] text-left">{formatCurrency(emp.salario)}</td>
+                      <td className="px-8 py-5 text-right text-left"><span className={`text-sm font-bold text-left ${getMonthsSince(emp.ultimaPromocao) > 12 ? 'text-orange-500' : 'text-slate-700'}`}>{getMonthsSince(emp.ultimaPromocao)} meses</span></td>
+                      <td className="px-8 py-5 text-right text-left"><div className="flex justify-end gap-1 text-left">
+                        <button onClick={() => open1on1History(emp)} className="p-2 text-slate-400 hover:text-[#0097A9] rounded-lg transition-all text-left" title="Histórico de 1:1"><MessageSquare size={18} text-left/></button>
                         {(isMaster || isPreviewBypass || (currentEmployeeProfile && emp.managerId === currentEmployeeProfile.id)) && (
                             <>
-                              <button onClick={() => openModal(emp)} className="p-2 text-slate-400 hover:text-[#244C5A] hover:bg-slate-200 rounded-lg" title="Editar"><Edit3 size={18}/></button>
-                              <button onClick={() => deleteEmployee(emp.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg" title="Excluir"><Trash2 size={18}/></button>
+                              <button onClick={() => openModal(emp)} className="p-2 text-slate-400 hover:text-[#244C5A] hover:bg-slate-200 rounded-lg text-left" title="Editar"><Edit3 size={18} text-left/></button>
+                              <button onClick={() => deleteEmployee(emp.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg text-left" title="Excluir"><Trash2 size={18} text-left/></button>
                             </>
                         )}
                       </div></td>
@@ -745,29 +741,29 @@ const App = () => {
       {/* MODAL 1:1 DENTRO DO TALENT HUB */}
       {is1on1ModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-md p-4 animate-in fade-in duration-300 text-left">
-          <div className="bg-white w-full max-w-4xl h-[90vh] rounded-[40px] shadow-2xl flex flex-col overflow-hidden border border-white/20">
-            <div className="bg-[#0097A9] p-8 flex justify-between items-start text-white shrink-0"><div><div className="flex items-center gap-2 text-[#FFC72C] mb-2 uppercase text-[10px] font-black tracking-[0.2em]"><Clock size={14}/> Performance</div><h2 className="text-3xl font-black">1:1 Histórico • {selectedEmpFor1on1?.nome}</h2></div><button onClick={() => setIs1on1ModalOpen(false)} className="bg-white/10 hover:bg-white/20 p-3 rounded-full transition-all"><X size={24}/></button></div>
-            <div className="flex flex-1 overflow-hidden">
-               <div className="w-1/2 border-r border-slate-100 flex flex-col bg-slate-50/30 text-slate-700">
-                  <div className="p-6 flex justify-between items-center border-b border-slate-100 bg-white"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Sessões</span><button onClick={() => handleStartNew1on1(selectedEmpFor1on1)} className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm bg-[#FFC72C] text-[#244C5A] shadow-md">Nova 1:1</button></div>
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          <div className="bg-white w-full max-w-4xl h-[90vh] rounded-[40px] shadow-2xl flex flex-col overflow-hidden border border-white/20 text-left text-slate-700">
+            <div className="bg-[#0097A9] p-8 flex justify-between items-start text-white shrink-0 text-left"><div><div className="flex items-center gap-2 text-[#FFC72C] mb-2 uppercase text-[10px] font-black tracking-[0.2em] text-left"><Clock size={14} text-left/> Performance</div><h2 className="text-3xl font-black text-left">1:1 Histórico • {selectedEmpFor1on1?.nome}</h2></div><button onClick={() => setIs1on1ModalOpen(false)} className="bg-white/10 hover:bg-white/20 p-3 rounded-full transition-all text-left"><X size={24} text-left/></button></div>
+            <div className="flex flex-1 overflow-hidden text-left">
+               <div className="w-1/2 border-r border-slate-100 flex flex-col bg-slate-50/30 text-slate-700 text-left">
+                  <div className="p-6 flex justify-between items-center border-b border-slate-100 bg-white text-left"><span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest text-left">Sessões</span><button onClick={() => handleStartNew1on1(selectedEmpFor1on1)} className="flex items-center gap-2 px-4 py-2 rounded-xl font-bold text-sm bg-[#FFC72C] text-[#244C5A] shadow-md text-left">Nova 1:1</button></div>
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4 text-left">
                     {specificOneOnOnes.map((item) => {
                         const sent = SENTIMENTS.find(s => s.value === item.sentimento) || SENTIMENTS[2];
                         const isDone = item.status === 'Finalizada';
-                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left"><div className="flex justify-between items-start mb-3"><div><div className="flex items-center gap-2 mb-1"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'}`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color}`} title={sent.label}><sent.icon size={18}/></div></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1"><Calendar size={10}/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600"><CheckCircle2 size={14}/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9]"><Edit3 size={14}/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500"><Trash2 size={14}/></button></div></div></div>);
+                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left text-slate-700"><div className="flex justify-between items-start mb-3 text-left"><div><div className="flex items-center gap-2 mb-1 text-left"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'} text-left`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase text-left">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color} text-left`} title={sent.label}><sent.icon size={18} text-left/></div></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap text-left">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50 text-left"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 text-left"><Calendar size={10} text-left/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all text-left text-slate-700"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600 text-left"><CheckCircle2 size={14} text-left/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9] text-left"><Edit3 size={14} text-left/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500 text-left"><Trash2 size={14} text-left/></button></div></div></div>);
                     })}
                   </div>
                </div>
-               <div className="w-1/2 overflow-y-auto bg-white p-10 text-slate-700">
+               <div className="w-1/2 overflow-y-auto bg-white p-10 text-slate-700 text-left">
                  {isAdding1on1 ? (
-                   <form onSubmit={handleSubmit1on1} className="space-y-6 animate-in slide-in-from-right duration-300">
-                     <h3 className="text-xl font-bold text-[#244C5A] flex items-center gap-2">{editing1on1Id ? 'Editar Sessão' : 'Registrar Conversa'}</h3>
-                     <div className="grid grid-cols-2 gap-4"><div className="col-span-2"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Título</label><input required value={form1on1.titulo} onChange={e => setForm1on1({...form1on1, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div><div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Data</label><input type="date" required value={form1on1.data} onChange={e => setForm1on1({...form1on1, data: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9]"/></div><div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Sentimento</label><div className="flex justify-between bg-slate-50 p-2 rounded-2xl border">{SENTIMENTS.map(s => <button key={s.value} type="button" onClick={() => setForm1on1({...form1on1, sentimento: s.value})} className={`p-2 rounded-xl transition-all ${form1on1.sentimento === s.value ? `${s.bg} ${s.color} shadow-sm scale-110` : 'text-slate-300'}`}><s.icon size={20}/></button>)}</div></div></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Decisões</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="6" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Pauta Futura</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none"></textarea></div>
-                     <button type="submit" className="w-full bg-[#244C5A] text-white font-bold py-5 rounded-3xl shadow-xl hover:bg-[#0097A9] transition-all flex items-center justify-center gap-2"><Save size={20}/> {editing1on1Id ? 'Atualizar' : 'Salvar'} Registro</button>
+                   <form onSubmit={handleSubmit1on1} className="space-y-6 animate-in slide-in-from-right duration-300 text-left">
+                     <h3 className="text-xl font-bold text-[#244C5A] flex items-center gap-2 text-left">{editing1on1Id ? 'Editar Sessão' : 'Registrar Conversa'}</h3>
+                     <div className="grid grid-cols-2 gap-4 text-left"><div className="col-span-2 text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest text-left">Título</label><input required value={form1on1.titulo} onChange={e => setForm1on1({...form1on1, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div><div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest text-left">Data</label><input type="date" required value={form1on1.data} onChange={e => setForm1on1({...form1on1, data: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700"/></div><div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest text-left">Sentimento</label><div className="flex justify-between bg-slate-50 p-2 rounded-2xl border text-left">{SENTIMENTS.map(s => <button key={s.value} type="button" onClick={() => setForm1on1({...form1on1, sentimento: s.value})} className={`p-2 rounded-xl transition-all ${form1on1.sentimento === s.value ? `${s.bg} ${s.color} shadow-sm scale-110` : 'text-slate-300'} text-left`}><s.icon size={20} text-left/></button>)}</div></div></div>
+                     <div className="text-left text-slate-700"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest text-left">Decisões</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="6" className="w-full p-4 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none text-left"></textarea></div>
+                     <div className="text-left text-slate-700"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest text-left">Pauta Futura</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:border-[#0097A9] text-sm resize-none text-left" placeholder="O que deve ser discutido no próximo encontro?"></textarea></div>
+                     <button type="submit" className="w-full bg-[#244C5A] text-white font-bold py-5 rounded-3xl shadow-xl hover:bg-[#0097A9] transition-all flex items-center justify-center gap-2 text-left"><Save size={20} text-left/> {editing1on1Id ? 'Atualizar' : 'Salvar'} Registro</button>
                    </form>
-                 ) : <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center"><MessageSquare size={48} className="opacity-10 mb-4"/><p className="text-sm">Selecione uma sessão ou crie uma nova.</p></div>}
+                 ) : <div className="h-full flex flex-col items-center justify-center text-slate-400 text-center text-left"><MessageSquare size={48} className="opacity-10 mb-4 text-left"/><p className="text-sm text-left">Selecione uma sessão ou crie uma nova.</p></div>}
                </div>
             </div>
           </div>
@@ -776,40 +772,32 @@ const App = () => {
 
       {/* MODAL FUNCIONÁRIO (EXISTENTE) */}
       {isModalOpen && (isMaster || isPreviewBypass || currentEmployeeProfile) && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200 text-slate-700">
-          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden text-left border border-white/10 text-slate-700">
-            <div className="bg-[#0097A9] p-6 flex justify-between items-center text-white shrink-0"><h2 className="text-xl font-bold flex items-center gap-3 text-left"><UserPlus/> {editingEmployee ? 'Editar' : 'Novo'} Colaborador</h2><button onClick={() => setIsModalOpen(false)}><X/></button></div>
-            <form onSubmit={handleSubmitEmployee} className="p-8 grid grid-cols-2 gap-6 max-h-[70vh] overflow-y-auto">
-              <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Nome Completo</label><input required value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
-              <div className="col-span-2"><label className="text-[10px] font-bold uppercase text-[#0097A9] block mb-2 tracking-widest">E-mail Corporativo</label><input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full p-4 bg-[#0097A9]/5 border-2 border-[#0097A9]/10 rounded-2xl outline-none focus:border-[#0097A9]" /></div>
-              <div className="col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left"><div className="flex items-center justify-between mb-4"><div className="flex items-center gap-2"><Layers size={18} className="text-[#0097A9]"/><label className="text-[10px] font-black uppercase text-[#244C5A] tracking-widest">Squads (Max 5)</label></div><button type="button" onClick={addAllocation} disabled={formData.allocations.length >= 5} className="text-[10px] font-black uppercase text-[#0097A9] hover:bg-[#0097A9]/10 px-3 py-1.5 rounded-xl transition-all disabled:opacity-30">+ Add Squad</button></div><div className="space-y-3">
-                    {formData.allocations.map((alloc, index) => (<div key={index} className="flex items-center gap-3 animate-in slide-in-from-left duration-200"><div className="flex-1"><select value={alloc.squad} onChange={e => updateAllocation(index, 'squad', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm">{SQUADS.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="w-24 relative"><input type="number" value={alloc.percent} onChange={e => updateAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9]" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">%</span></div>{formData.allocations.length > 1 && (<button type="button" onClick={() => removeAllocation(index)} className="text-slate-300 hover:text-red-500"><MinusCircle size={20}/></button>)}</div>))}
-                </div><div className="mt-4 flex items-center justify-between border-t pt-3"><span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Total</span><div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'}`}><span className="text-sm font-black">{formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0)}%</span></div></div></div>
-              <div className="col-span-2 text-left"><label className="text-[10px] font-bold uppercase text-[#0097A9] flex items-center gap-2 mb-2 tracking-widest"><ShieldCheck size={14}/> Gestor Direto</label><select value={formData.managerId} onChange={e => setFormData({...formData, managerId: e.target.value})} disabled={!(isMaster || isPreviewBypass)} className={`w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] ${!(isMaster || isPreviewBypass) ? 'opacity-50' : ''}`}><option value="">Sem Gestor Direto</option>{employees.filter(e => e.id !== editingEmployee?.id).map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}</select></div>
-              <div className="col-span-2 grid grid-cols-2 gap-4 text-left">
-                  <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Cargo</label><input required value={formData.cargo} onChange={e => setFormData({...formData, cargo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
-                  <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Contrato</label><select value={formData.modeloTrabalho} onChange={e => setFormData({...formData, modeloTrabalho: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none"><option value="CLT">CLT</option><option value="PJ">PJ</option><option value="Estagiário">Estagiário</option></select></div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#244C5A]/80 backdrop-blur-sm p-4 animate-in fade-in duration-200 text-slate-700 text-left">
+          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl flex flex-col overflow-hidden text-left border border-white/10 text-slate-700 text-left">
+            <div className="bg-[#0097A9] p-6 flex justify-between items-center text-white shrink-0 text-left"><h2 className="text-xl font-bold flex items-center gap-3 text-left text-left"><UserPlus text-left/> {editingEmployee ? 'Editar' : 'Novo'} Colaborador</h2><button onClick={() => setIsModalOpen(false)} className="text-left"><X text-left/></button></div>
+            <form onSubmit={handleSubmitEmployee} className="p-8 grid grid-cols-2 gap-6 max-h-[70vh] overflow-y-auto text-left text-slate-700 text-left">
+              <div className="col-span-2 text-left"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Nome Completo</label><input required value={formData.nome} onChange={e => setFormData({...formData, nome: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
+              <div className="col-span-2 text-left"><label className="text-[10px] font-bold uppercase text-[#0097A9] block mb-2 tracking-widest text-left">E-mail Corporativo</label><input type="email" value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="w-full p-4 bg-[#0097A9]/5 border-2 border-[#0097A9]/10 rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
+              <div className="col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left"><div className="flex items-center justify-between mb-4 text-left text-slate-700"><div className="flex items-center gap-2 text-left"><Layers size={18} className="text-[#0097A9] text-left"/><label className="text-[10px] font-black uppercase text-[#244C5A] tracking-widest text-left">Squads (Max 5)</label></div><button type="button" onClick={addAllocation} disabled={formData.allocations.length >= 5} className="text-[10px] font-black uppercase text-[#0097A9] hover:bg-[#0097A9]/10 px-3 py-1.5 rounded-xl disabled:opacity-30 text-left">+ Add Squad</button></div><div className="space-y-3 text-left">
+                    {formData.allocations.map((alloc, index) => (<div key={index} className="flex items-center gap-3 animate-in slide-in-from-left duration-200 text-left"><div className="flex-1 text-left"><select value={alloc.squad} onChange={e => updateAllocation(index, 'squad', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm text-left text-slate-700">{SQUADS.map(s => <option key={s} value={s}>{s}</option>)}</select></div><div className="w-24 relative text-left"><input type="number" value={alloc.percent} onChange={e => updateAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9] text-left text-slate-700" /><span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 text-left">%</span></div>{formData.allocations.length > 1 && (<button type="button" onClick={() => removeAllocation(index)} className="text-slate-300 hover:text-red-500 text-left"><MinusCircle size={20} text-left/></button>)}</div>))}
+                </div><div className="mt-4 flex items-center justify-between border-t pt-3 text-left text-slate-700"><span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter text-left">Total</span><div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'} text-left text-slate-700`}><span className="text-sm font-black text-left">{formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0)}%</span></div></div></div>
+              <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-[#0097A9] flex items-center gap-2 mb-2 tracking-widest text-left"><ShieldCheck size={14} text-left/> Gestor Direto</label><select value={formData.managerId} onChange={e => setFormData({...formData, managerId: e.target.value})} disabled={!(isMaster || isPreviewBypass)} className={`w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] ${!(isMaster || isPreviewBypass) ? 'opacity-50' : ''} text-left text-slate-700`}><option value="">Sem Gestor Direto</option>{employees.filter(e => e.id !== editingEmployee?.id).map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}</select></div>
+              <div className="col-span-2 grid grid-cols-2 gap-4 text-left text-slate-700">
+                  <div className="text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Cargo</label><input required value={formData.cargo} onChange={e => setFormData({...formData, cargo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
+                  <div className="text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Contrato</label><select value={formData.modeloTrabalho} onChange={e => setFormData({...formData, modeloTrabalho: e.target.value})} className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none text-left text-slate-700"><option value="CLT">CLT</option><option value="PJ">PJ</option><option value="Estagiário">Estagiário</option></select></div>
               </div>
-              <div className="grid grid-cols-2 gap-4 col-span-2 text-left">
-                  <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Senioridade</label><select value={formData.senioridade} onChange={e => setFormData({...formData, senioridade: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none"><option value="Estagiário">Estagiário</option><option value="Júnior">Júnior</option><option value="Pleno">Pleno</option><option value="Sênior">Sênior</option><option value="Lead">Lead</option></select></div>
-                  <div><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Salário Nominal (R$)</label><input required type="number" step="0.01" value={formData.salario} onChange={e => setFormData({...formData, salario: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
+              <div className="grid grid-cols-2 gap-4 col-span-2 text-left text-slate-700">
+                  <div className="text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Senioridade</label><select value={formData.senioridade} onChange={e => setFormData({...formData, senioridade: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-left text-slate-700"><option value="Estagiário">Estagiário</option><option value="Júnior">Júnior</option><option value="Pleno">Pleno</option><option value="Sênior">Sênior</option><option value="Lead">Lead</option></select></div>
+                  <div className="text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Salário Nominal (R$)</label><input required type="number" step="0.01" value={formData.salario} onChange={e => setFormData({...formData, salario: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
               </div>
-              <div className="col-span-2 text-left"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9]" /></div>
+              <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
             </form>
-            <div className="p-8 bg-slate-50 border-t flex gap-4"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30">Salvar Registro</button></div>
+            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-left text-left">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-left text-left text-left">Salvar Registro</button></div>
           </div>
         </div>
       )}
     </div>
   );
 };
-
-// SVG LOGO COMPONENT
-const ArkmedsLogo = ({ className = "h-8" }) => (
-    <div className={`flex items-center gap-2 ${className}`}>
-        <div className="w-8 h-8 bg-[#0097A9] rounded-lg flex items-center justify-center text-white font-black text-xl">A</div>
-        <span className="font-black tracking-tighter text-xl text-inherit">ARKMEDS</span>
-    </div>
-);
 
 export default App;
