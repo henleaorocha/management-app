@@ -55,7 +55,8 @@ import {
   FileText,
   Target,
   BarChart3,
-  Globe2
+  Globe2,
+  Filter
 } from 'lucide-react';
 
 // Firebase Imports
@@ -243,6 +244,11 @@ const App = () => {
     allocations: [{ department: DEPARTMENTS[0], percent: 100 }] // Novo campo para rateio
   });
 
+  // Filtros de Orçamento
+  const [budgetFilterMonth, setBudgetFilterMonth] = useState('');
+  const [budgetFilterDept, setBudgetFilterDept] = useState('');
+  const [budgetFilterStatus, setBudgetFilterStatus] = useState('');
+
   // Common States
   const [authChecking, setAuthChecking] = useState(true);
   const [isPreviewBypass, setIsPreviewBypass] = useState(false);
@@ -380,11 +386,31 @@ const App = () => {
       return { relevantSessions, todaySessions };
   }, [globalOneOnOnes, visibleEmployees, TODAY_STR]);
 
+  const filteredBudgetItems = useMemo(() => {
+    return budgetItems.filter(item => {
+      const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
+      const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
+      
+      // Verifica se o departamento filtrado está em alguma das alocações do item
+      let matchDept = true;
+      if (budgetFilterDept) {
+        if (item.allocations && item.allocations.length > 0) {
+          matchDept = item.allocations.some(a => a.department === budgetFilterDept);
+        } else {
+          matchDept = item.departamento === budgetFilterDept;
+        }
+      }
+      
+      return matchMonth && matchStatus && matchDept;
+    });
+  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept]);
+
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
       let totalRealizado = 0;
 
-      budgetItems.forEach(item => {
+      // Usando itens filtrados para o totalizador responder aos filtros
+      filteredBudgetItems.forEach(item => {
           const vPrev = Number(item.valorPrevisto || 0);
           const vReal = Number(item.valorRealizado || 0);
           const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
@@ -394,7 +420,7 @@ const App = () => {
       });
 
       return { totalPrevisto, totalRealizado };
-  }, [budgetItems]);
+  }, [filteredBudgetItems]);
 
   // --- Firebase Effects ---
   useEffect(() => {
@@ -958,9 +984,60 @@ const App = () => {
                 </div>
 
                 <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
-                    <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                        <h3 className="font-bold text-[#244C5A] flex items-center gap-2"><ListFilter size={18}/> Itens do Orçamento</h3>
-                        <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest">{budgetItems.length} REGISTROS</div>
+                    <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
+                        <div className="flex items-center gap-2">
+                            <h3 className="font-bold text-[#244C5A] flex items-center gap-2"><ListFilter size={18}/> Itens do Orçamento</h3>
+                            <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest bg-white px-2 py-1 rounded-md border border-slate-100">{filteredBudgetItems.length}</div>
+                        </div>
+                        
+                        {/* Filtros */}
+                        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                            <div className="relative">
+                                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                <select 
+                                    value={budgetFilterMonth} 
+                                    onChange={(e) => setBudgetFilterMonth(e.target.value)}
+                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
+                                >
+                                    <option value="">Todos os Meses</option>
+                                    {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="relative">
+                                <Layers size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                <select 
+                                    value={budgetFilterDept} 
+                                    onChange={(e) => setBudgetFilterDept(e.target.value)}
+                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
+                                >
+                                    <option value="">Todos Deptos.</option>
+                                    {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                                </select>
+                            </div>
+
+                            <div className="relative">
+                                <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                                <select 
+                                    value={budgetFilterStatus} 
+                                    onChange={(e) => setBudgetFilterStatus(e.target.value)}
+                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
+                                >
+                                    <option value="">Todos Status</option>
+                                    {BUDGET_STATUS.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                            </div>
+                            
+                            {(budgetFilterMonth || budgetFilterDept || budgetFilterStatus) && (
+                                <button 
+                                    onClick={() => { setBudgetFilterMonth(''); setBudgetFilterDept(''); setBudgetFilterStatus(''); }}
+                                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+                                    title="Limpar Filtros"
+                                >
+                                    <X size={16}/>
+                                </button>
+                            )}
+                        </div>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="w-full text-left text-slate-700">
@@ -977,10 +1054,10 @@ const App = () => {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
-                                {budgetItems.length === 0 ? (
-                                    <tr><td colSpan="8" className="p-12 text-center text-slate-400 italic">Nenhum item orçamentário cadastrado.</td></tr>
+                                {filteredBudgetItems.length === 0 ? (
+                                    <tr><td colSpan="8" className="p-12 text-center text-slate-400 italic">Nenhum item orçamentário encontrado.</td></tr>
                                 ) : (
-                                    budgetItems.map(item => {
+                                    filteredBudgetItems.map(item => {
                                         const saldo = (Number(item.valorRealizado || 0) - Number(item.valorPrevisto || 0));
                                         const hasMultipleDepts = item.allocations && item.allocations.length > 1;
                                         const mainDept = item.allocations && item.allocations.length > 0 ? item.allocations[0].department : (item.departamento || 'N/A');
@@ -1322,7 +1399,7 @@ const App = () => {
               </div>
               <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
             </form>
-            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-left text-left">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-left text-left text-left">Salvar Registro</button></div>
+            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 justify-center text-center"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-center">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-center">Salvar Registro</button></div>
           </div>
         </div>
       )}
