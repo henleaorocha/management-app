@@ -142,7 +142,6 @@ const App = () => {
 
   const [is1on1ModalOpen, setIs1on1ModalOpen] = useState(false);
   const [selectedEmpFor1on1, setSelectedEmpFor1on1] = useState(null);
-  const [specificOneOnOnes, setSpecificOneOnOnes] = useState([]); 
   const [loading1on1s, setLoading1on1s] = useState(false);
   const [isAdding1on1, setIsAdding1on1] = useState(false);
   const [editing1on1Id, setEditing1on1Id] = useState(null);
@@ -193,6 +192,13 @@ const App = () => {
 
   // --- Memos ---
   const isMaster = useMemo(() => user?.email?.toLowerCase() === MASTER_EMAIL.toLowerCase(), [user]);
+
+  const specificOneOnOnes = useMemo(() => {
+    if (!selectedEmpFor1on1) return [];
+    return globalOneOnOnes
+        .filter(s => s.employeeId === selectedEmpFor1on1.id)
+        .sort((a, b) => new Date(b.data) - new Date(a.data));
+  }, [globalOneOnOnes, selectedEmpFor1on1]);
   
   const currentEmployeeProfile = useMemo(() => {
     return employees.find(e => e.email?.toLowerCase() === user?.email?.toLowerCase());
@@ -792,7 +798,7 @@ const App = () => {
               </div>
               <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
             </form>
-            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-left text-left">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-left text-left text-left">Salvar Registro</button></div>
+            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 text-left"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-center">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-center">Salvar Registro</button></div>
           </div>
         </div>
       )}
