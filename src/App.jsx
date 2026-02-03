@@ -56,7 +56,8 @@ import {
   Target,
   BarChart3,
   Globe2,
-  Filter
+  Filter,
+  ArrowDownWideNarrow
 } from 'lucide-react';
 
 // Firebase Imports
@@ -241,13 +242,14 @@ const App = () => {
     moeda: 'BRL',
     tipoDespesa: EXPENSE_TYPES[0],
     categoria: CATEGORIES[0],
-    allocations: [{ department: DEPARTMENTS[0], percent: 100 }] // Novo campo para rateio
+    allocations: [{ department: DEPARTMENTS[0], percent: 100 }]
   });
 
-  // Filtros de Orçamento
+  // Filtros e Ordenação de Orçamento
   const [budgetFilterMonth, setBudgetFilterMonth] = useState('');
   const [budgetFilterDept, setBudgetFilterDept] = useState('');
   const [budgetFilterStatus, setBudgetFilterStatus] = useState('');
+  const [budgetSortConfig, setBudgetSortConfig] = useState({ key: 'mes', direction: 'asc' });
 
   // Common States
   const [authChecking, setAuthChecking] = useState(true);
@@ -387,11 +389,10 @@ const App = () => {
   }, [globalOneOnOnes, visibleEmployees, TODAY_STR]);
 
   const filteredBudgetItems = useMemo(() => {
-    return budgetItems.filter(item => {
+    let items = budgetItems.filter(item => {
       const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
       const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
       
-      // Verifica se o departamento filtrado está em alguma das alocações do item
       let matchDept = true;
       if (budgetFilterDept) {
         if (item.allocations && item.allocations.length > 0) {
@@ -403,13 +404,51 @@ const App = () => {
       
       return matchMonth && matchStatus && matchDept;
     });
-  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept]);
+
+    // Ordenação
+    const { key, direction } = budgetSortConfig;
+    items.sort((a, b) => {
+        let aVal = a[key];
+        let bVal = b[key];
+
+        // Lógica para Depto principal caso não tenha
+        if (key === 'departamento') {
+            const getDept = (i) => i.allocations && i.allocations.length > 0 ? i.allocations[0].department : (i.departamento || '');
+            aVal = getDept(a);
+            bVal = getDept(b);
+        }
+
+        // Lógica para saldo
+        if (key === 'saldo') {
+            aVal = Number(a.valorRealizado || 0) - Number(a.valorPrevisto || 0);
+            bVal = Number(b.valorRealizado || 0) - Number(b.valorPrevisto || 0);
+        }
+
+        if (key === 'mes') {
+            return direction === 'asc' 
+                ? MONTHS.indexOf(a.mes) - MONTHS.indexOf(b.mes) 
+                : MONTHS.indexOf(b.mes) - MONTHS.indexOf(a.mes);
+        }
+
+        if (key === 'valorPrevisto' || key === 'valorRealizado' || key === 'saldo') {
+            const numA = Number(aVal || 0);
+            const numB = Number(bVal || 0);
+            return direction === 'asc' ? numA - numB : numB - numA;
+        }
+
+        // String default
+        const strA = (aVal || '').toString().toLowerCase();
+        const strB = (bVal || '').toString().toLowerCase();
+        return direction === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
+    });
+
+    return items;
+  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig]);
 
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
       let totalRealizado = 0;
 
-      // Usando itens filtrados para o totalizador responder aos filtros
       filteredBudgetItems.forEach(item => {
           const vPrev = Number(item.valorPrevisto || 0);
           const vReal = Number(item.valorRealizado || 0);
@@ -552,7 +591,6 @@ const App = () => {
   const openBudgetModal = (item = null) => {
     if (item) {
         setEditingBudgetId(item.id);
-        // Garante que exista um array de alocações, mesmo se o item for antigo
         const allocations = (item.allocations && item.allocations.length > 0) 
             ? item.allocations 
             : [{ department: item.departamento || DEPARTMENTS[0], percent: 100 }];
@@ -600,7 +638,6 @@ const App = () => {
     }
   };
 
-  // Handlers para alocação do Orçamento
   const addBudgetAllocation = () => {
     if (budgetForm.allocations.length >= 5) return;
     setBudgetForm({ ...budgetForm, allocations: [...budgetForm.allocations, { department: DEPARTMENTS[0], percent: 0 }] });
@@ -622,13 +659,11 @@ const App = () => {
     if (!auth.currentUser) return;
     if (budgetForm.selectedMonths.length === 0) return alert("Selecione pelo menos um mês.");
     
-    // Validação da soma das porcentagens
     const totalPercent = budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0);
     if (totalPercent !== 100) return alert("A alocação por departamentos deve somar 100%.");
 
     try {
         if (editingBudgetId) {
-            // Update single item
             const data = {
                 titulo: budgetForm.titulo,
                 descricao: budgetForm.descricao,
@@ -636,7 +671,7 @@ const App = () => {
                 status: budgetForm.status,
                 valorPrevisto: Number(budgetForm.valorPrevisto),
                 valorRealizado: Number(budgetForm.valorRealizado),
-                allocations: budgetForm.allocations, // Salva o array de alocações
+                allocations: budgetForm.allocations, 
                 moeda: budgetForm.moeda,
                 tipoDespesa: budgetForm.tipoDespesa,
                 categoria: budgetForm.categoria,
@@ -644,7 +679,6 @@ const App = () => {
             };
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', editingBudgetId), data, { merge: true });
         } else {
-            // Create multiple items (one for each selected month)
             const batchPromises = budgetForm.selectedMonths.map(month => {
                 const data = {
                     titulo: budgetForm.titulo,
@@ -653,7 +687,7 @@ const App = () => {
                     status: budgetForm.status,
                     valorPrevisto: Number(budgetForm.valorPrevisto),
                     valorRealizado: Number(budgetForm.valorRealizado),
-                    allocations: budgetForm.allocations, // Salva o array de alocações
+                    allocations: budgetForm.allocations, 
                     moeda: budgetForm.moeda,
                     tipoDespesa: budgetForm.tipoDespesa,
                     categoria: budgetForm.categoria,
@@ -748,6 +782,24 @@ const App = () => {
           <span className={`${isActive ? 'text-[#0097A9]' : ''}`}>{label}</span>
           <div className="flex flex-col opacity-30 group-hover:opacity-100 transition-opacity">
             {isActive && sortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-[#0097A9]" /> : isActive && sortConfig.direction === 'desc' ? <ChevronDown size={14} className="text-[#0097A9]" /> : <ArrowUpDown size={14} />}
+          </div>
+        </div>
+      </th>
+    );
+  };
+
+  const SortableBudgetTh = ({ label, sortKey, align = 'left', center = false }) => {
+    const isActive = budgetSortConfig.key === sortKey;
+    return (
+      <th className={`px-6 py-4 cursor-pointer hover:bg-[#0097A9]/5 transition-colors group ${align === 'right' ? 'text-right' : align === 'center' ? 'text-center' : 'text-left'}`} onClick={() => {
+        let direction = 'asc';
+        if (isActive && budgetSortConfig.direction === 'asc') direction = 'desc';
+        setBudgetSortConfig({ key: sortKey, direction });
+      }}>
+        <div className={`flex items-center gap-2 ${align === 'right' ? 'justify-end' : align === 'center' ? 'justify-center' : 'justify-start'}`}>
+          <span className={`${isActive ? 'text-[#0097A9]' : ''}`}>{label}</span>
+          <div className="flex flex-col opacity-30 group-hover:opacity-100 transition-opacity">
+            {isActive && budgetSortConfig.direction === 'asc' ? <ChevronUp size={14} className="text-[#0097A9]" /> : isActive && budgetSortConfig.direction === 'desc' ? <ChevronDown size={14} className="text-[#0097A9]" /> : <ArrowUpDown size={14} />}
           </div>
         </div>
       </th>
@@ -1043,13 +1095,13 @@ const App = () => {
                         <table className="w-full text-left text-slate-700">
                             <thead>
                                 <tr className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest border-b">
-                                    <th className="px-6 py-4">Descrição</th>
-                                    <th className="px-6 py-4">Mês</th>
-                                    <th className="px-6 py-4">Depto.</th>
-                                    <th className="px-6 py-4 text-center">Status</th>
-                                    <th className="px-6 py-4 text-right">Valor Previsto</th>
-                                    <th className="px-6 py-4 text-right">Valor Realizado</th>
-                                    <th className="px-6 py-4 text-right">Saldo</th>
+                                    <SortableBudgetTh label="Descrição" sortKey="titulo" />
+                                    <SortableBudgetTh label="Mês" sortKey="mes" />
+                                    <SortableBudgetTh label="Depto." sortKey="departamento" />
+                                    <SortableBudgetTh label="Status" sortKey="status" center />
+                                    <SortableBudgetTh label="Valor Previsto" sortKey="valorPrevisto" align="right" />
+                                    <SortableBudgetTh label="Valor Realizado" sortKey="valorRealizado" align="right" />
+                                    <SortableBudgetTh label="Saldo" sortKey="saldo" align="right" />
                                     <th className="px-6 py-4 text-right">Ações</th>
                                 </tr>
                             </thead>
