@@ -450,16 +450,33 @@ const App = () => {
       let totalRealizado = 0;
 
       filteredBudgetItems.forEach(item => {
-          const vPrev = Number(item.valorPrevisto || 0);
-          const vReal = Number(item.valorRealizado || 0);
+          let vPrev = Number(item.valorPrevisto || 0);
+          let vReal = Number(item.valorRealizado || 0);
           const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
 
-          totalPrevisto += vPrev * rate;
-          totalRealizado += vReal * rate;
+          // Converter para BRL
+          vPrev = vPrev * rate;
+          vReal = vReal * rate;
+
+          // Se houver filtro de departamento, aplica o rateio
+          if (budgetFilterDept) {
+              if (item.allocations && item.allocations.length > 0) {
+                  const alloc = item.allocations.find(a => a.department === budgetFilterDept);
+                  if (alloc) {
+                      const share = Number(alloc.percent) / 100;
+                      vPrev = vPrev * share;
+                      vReal = vReal * share;
+                  }
+              }
+              // Se não tiver alocação múltipla (item antigo), o filtro já garantiu que é do departamento certo, então é 100%
+          }
+
+          totalPrevisto += vPrev;
+          totalRealizado += vReal;
       });
 
       return { totalPrevisto, totalRealizado };
-  }, [filteredBudgetItems]);
+  }, [filteredBudgetItems, budgetFilterDept]);
 
   // --- Firebase Effects ---
   useEffect(() => {
