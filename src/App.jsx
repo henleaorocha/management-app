@@ -131,7 +131,9 @@ const EXPENSE_TYPES = [
   "Custos de Produção",
   "Despesas Administrativas",
   "Despesas Bancárias",
+  "Despesas com Equipamentos"
   "Despesas com Equipe",
+  "Despesas FAPEMIG - Módulo de Gases",
   "Despesas com Manutenção",
   "Despesas com Marketing",
   "Despesas com P&D - Prototipação",
@@ -162,6 +164,7 @@ const CATEGORIES = [
   "Cursos e Treinamentos",
   "Despesas de Viagens",
   "Despesas Diversas",
+  "Ensaios de Certificação",
   "Equipamentos de Informática",
   "Equipamentos para Testes",
   "Feiras e Eventos",
