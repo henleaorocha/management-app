@@ -57,7 +57,8 @@ import {
   BarChart3,
   Globe2,
   Filter,
-  ArrowDownWideNarrow
+  ArrowDownWideNarrow,
+  BarChart2
 } from 'lucide-react';
 
 // Firebase Imports
@@ -131,9 +132,7 @@ const EXPENSE_TYPES = [
   "Custos de Produção",
   "Despesas Administrativas",
   "Despesas Bancárias",
-  "Despesas com Equipamentos",
   "Despesas com Equipe",
-  "Despesas FAPEMIG - Módulo de Gases",
   "Despesas com Manutenção",
   "Despesas com Marketing",
   "Despesas com P&D - Prototipação",
@@ -164,7 +163,6 @@ const CATEGORIES = [
   "Cursos e Treinamentos",
   "Despesas de Viagens",
   "Despesas Diversas",
-  "Ensaios de Certificação",
   "Equipamentos de Informática",
   "Equipamentos para Testes",
   "Feiras e Eventos",
@@ -219,6 +217,46 @@ const ArkmedsLogo = ({ className = "h-8" }) => (
         <span className="font-black tracking-tighter text-xl text-inherit">ARKMEDS</span>
     </div>
 );
+
+// Componente de Gráfico de Barras Customizado
+const BudgetBarChart = ({ data, maxValue }) => {
+  return (
+    <div className="w-full h-64 flex items-end justify-between gap-2 mt-6">
+      {data.map((item, index) => {
+        const heightPrev = maxValue > 0 ? (item.previsto / maxValue) * 100 : 0;
+        const heightReal = maxValue > 0 ? (item.realizado / maxValue) * 100 : 0;
+        
+        return (
+          <div key={index} className="flex flex-col items-center flex-1 group relative h-full justify-end">
+            {/* Tooltip on Hover */}
+            <div className="absolute bottom-full mb-2 bg-slate-800 text-white text-[10px] p-2 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity z-10 w-max pointer-events-none shadow-xl">
+              <p className="font-bold uppercase tracking-widest mb-1 text-slate-400">{item.mes}</p>
+              <p className="text-[#FFC72C]">Prev: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.previsto)}</p>
+              <p className="text-[#0097A9]">Real: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.realizado)}</p>
+            </div>
+
+            <div className="flex gap-1 w-full justify-center items-end h-full px-1">
+                {/* Barra Previsto */}
+                <div 
+                    className="w-1/2 bg-[#FFC72C] rounded-t-md transition-all duration-500 hover:brightness-110 relative min-h-[4px]"
+                    style={{ height: `${Math.max(heightPrev, 1)}%` }}
+                ></div>
+                {/* Barra Realizado */}
+                <div 
+                    className="w-1/2 bg-[#0097A9] rounded-t-md transition-all duration-500 hover:brightness-110 relative min-h-[4px]"
+                    style={{ height: `${Math.max(heightReal, 1)}%` }}
+                ></div>
+            </div>
+            
+            <span className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-tighter truncate w-full text-center">
+              {item.mes.substring(0, 3)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+};
 
 const App = () => {
   // --- Estados ---
@@ -414,14 +452,12 @@ const App = () => {
         let aVal = a[key];
         let bVal = b[key];
 
-        // Lógica para Depto principal caso não tenha
         if (key === 'departamento') {
             const getDept = (i) => i.allocations && i.allocations.length > 0 ? i.allocations[0].department : (i.departamento || '');
             aVal = getDept(a);
             bVal = getDept(b);
         }
 
-        // Lógica para saldo
         if (key === 'saldo') {
             aVal = Number(a.valorRealizado || 0) - Number(a.valorPrevisto || 0);
             bVal = Number(b.valorRealizado || 0) - Number(b.valorPrevisto || 0);
@@ -439,7 +475,6 @@ const App = () => {
             return direction === 'asc' ? numA - numB : numB - numA;
         }
 
-        // String default
         const strA = (aVal || '').toString().toLowerCase();
         const strB = (bVal || '').toString().toLowerCase();
         return direction === 'asc' ? strA.localeCompare(strB) : strB.localeCompare(strA);
@@ -448,6 +483,67 @@ const App = () => {
     return items;
   }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig]);
 
+  // Cálculo para o Gráfico e Totalizadores
+  // Respeita filtro de Depto mas IGNORA filtro de Mês para mostrar o ano todo
+  const chartData = useMemo(() => {
+      // 1. Array de base para os 12 meses
+      const data = MONTHS.map(m => ({ mes: m, previsto: 0, realizado: 0 }));
+      
+      let totalPrevistoOverall = 0;
+      let totalRealizadoOverall = 0;
+
+      // 2. Itera sobre TODOS os itens (ou apenas filtrados por status, se desejar)
+      // Aqui usamos budgetItems puros, mas aplicamos a lógica do Depto manualmente
+      // para garantir que o gráfico mostre todos os meses mesmo se o filtro de mês estiver ativo na tabela.
+      
+      const itemsToProcess = budgetItems.filter(item => {
+          // Aplica filtro de Status se existir
+          return budgetFilterStatus ? item.status === budgetFilterStatus : true;
+      });
+
+      itemsToProcess.forEach(item => {
+          const monthIndex = MONTHS.indexOf(item.mes);
+          if (monthIndex === -1) return;
+
+          let vPrev = Number(item.valorPrevisto || 0);
+          let vReal = Number(item.valorRealizado || 0);
+          const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
+
+          // Conversão para BRL
+          vPrev = vPrev * rate;
+          vReal = vReal * rate;
+
+          // Aplica Rateio se houver filtro de Depto
+          if (budgetFilterDept) {
+              let share = 0;
+              if (item.allocations && item.allocations.length > 0) {
+                  const alloc = item.allocations.find(a => a.department === budgetFilterDept);
+                  if (alloc) share = Number(alloc.percent) / 100;
+              } else {
+                  // Fallback para itens antigos sem alocação múltipla
+                  if (item.departamento === budgetFilterDept) share = 1;
+              }
+              vPrev = vPrev * share;
+              vReal = vReal * share;
+          }
+
+          // Soma no mês correspondente
+          data[monthIndex].previsto += vPrev;
+          data[monthIndex].realizado += vReal;
+
+          // Soma nos totais gerais (considerando apenas o que "sobrou" após o filtro de dept)
+          // Nota: O card de totais deve bater com a tabela? 
+          // Se o filtro de Mês estiver ativo na tabela, a tabela mostra X. 
+          // O gráfico mostra o ano todo. 
+          // Os cards de topo geralmente mostram o total do que está VISÍVEL na tabela.
+          // Mas o usuário pediu "gráfico... mostre a cada mês o total".
+          // Vou manter os cards de topo vinculados aos itens FILTRADOS da tabela (filteredBudgetItems) para consistência com a lista.
+      });
+
+      return data;
+  }, [budgetItems, budgetFilterDept, budgetFilterStatus]);
+
+  // Totais para os Cards (baseado na tabela filtrada)
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
       let totalRealizado = 0;
@@ -457,11 +553,11 @@ const App = () => {
           let vReal = Number(item.valorRealizado || 0);
           const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
 
-          // Converter para BRL
           vPrev = vPrev * rate;
           vReal = vReal * rate;
 
-          // Se houver filtro de departamento, aplica o rateio
+          // O filtro de departamento já filtrou os ITENS que contêm o departamento.
+          // Agora precisamos somar apenas a PARCELA desse departamento se houver rateio.
           if (budgetFilterDept) {
               if (item.allocations && item.allocations.length > 0) {
                   const alloc = item.allocations.find(a => a.department === budgetFilterDept);
@@ -471,7 +567,6 @@ const App = () => {
                       vReal = vReal * share;
                   }
               }
-              // Se não tiver alocação múltipla (item antigo), o filtro já garantiu que é do departamento certo, então é 100%
           }
 
           totalPrevisto += vPrev;
@@ -480,6 +575,16 @@ const App = () => {
 
       return { totalPrevisto, totalRealizado };
   }, [filteredBudgetItems, budgetFilterDept]);
+
+  // Max value para escala do gráfico
+  const chartMaxValue = useMemo(() => {
+      let max = 0;
+      chartData.forEach(d => {
+          if (d.previsto > max) max = d.previsto;
+          if (d.realizado > max) max = d.realizado;
+      });
+      return max > 0 ? max : 1; // Evita divisão por zero
+  }, [chartData]);
 
   // --- Firebase Effects ---
   useEffect(() => {
@@ -1053,6 +1158,8 @@ const App = () => {
                             </div>
                         </div>
                     </div>
+                    {/* Gráfico de Barras */}
+                    <BudgetBarChart data={chartData} maxValue={chartMaxValue} />
                 </div>
 
                 <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
