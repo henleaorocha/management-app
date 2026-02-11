@@ -471,37 +471,38 @@ const App = () => {
 
     let share = 1;
 
-    // Se for Admin: vê 100% a menos que filtre
-    if (isMaster) {
-        if (budgetFilterDept) {
-            if (item.allocations && item.allocations.length > 0) {
-                const alloc = item.allocations.find(a => a.department === budgetFilterDept);
-                share = alloc ? Number(alloc.percent) / 100 : 0;
-            } else {
-                share = item.departamento === budgetFilterDept ? 1 : 0;
-            }
+    // Se for Admin: vê 100% (a menos que filtre, mas aqui calculamos o valor 'base')
+    // Se for Gestor: vê apenas a parte dele, mesmo sem filtro
+    if (!isMaster) {
+         if (item.allocations && item.allocations.length > 0) {
+            // Soma a porcentagem apenas dos deptos que ele gerencia
+            const myPercent = item.allocations
+                .filter(a => myManagedDepts.includes(a.department))
+                .reduce((sum, a) => sum + Number(a.percent), 0);
+            share = myPercent / 100;
+        } else {
+            // Item legado ou sem alocação
+            share = myManagedDepts.includes(item.departamento) ? 1 : 0;
         }
-    } else {
-        // Se for Gestor
-        if (budgetFilterDept) {
-            // Se filtrou um depto especifico (que ele deve gerenciar)
-            if (item.allocations && item.allocations.length > 0) {
-                const alloc = item.allocations.find(a => a.department === budgetFilterDept);
-                share = alloc ? Number(alloc.percent) / 100 : 0;
-            } else {
-                share = item.departamento === budgetFilterDept ? 1 : 0;
+    }
+    
+    // Agora aplica o filtro DE VISUALIZAÇÃO (se o usuário selecionou um filtro específico)
+    // Se o usuário selecionou "ArkP", queremos ver SÓ a parte do ArkP, mesmo que ele gerencie ArkP e CMMS.
+    if (budgetFilterDept) {
+        if (item.allocations && item.allocations.length > 0) {
+            const alloc = item.allocations.find(a => a.department === budgetFilterDept);
+            // Se o depto filtrado não está na alocação, share vira 0
+            // Se está, share vira a % daquele depto
+            share = alloc ? Number(alloc.percent) / 100 : 0;
+            
+            // Segurança extra: se não for Master, só pode ver se gerencia esse depto filtrado
+            if (!isMaster && !myManagedDepts.includes(budgetFilterDept)) {
+                share = 0;
             }
         } else {
-            // Se está vendo "Todos" (Resumo dos Meus Deptos)
-            if (item.allocations && item.allocations.length > 0) {
-                // Soma a porcentagem apenas dos deptos que ele gerencia
-                const myPercent = item.allocations
-                    .filter(a => myManagedDepts.includes(a.department))
-                    .reduce((sum, a) => sum + Number(a.percent), 0);
-                share = myPercent / 100;
-            } else {
-                // Item legado: 100% se for um depto dele, 0% se não
-                share = myManagedDepts.includes(item.departamento) ? 1 : 0;
+            share = item.departamento === budgetFilterDept ? 1 : 0;
+             if (!isMaster && !myManagedDepts.includes(item.departamento)) {
+                share = 0;
             }
         }
     }
@@ -517,6 +518,9 @@ const App = () => {
     let items = budgetItems.filter(item => {
       // 1. Filtro de Segurança / Row-Level Security
       if (!isMaster) {
+        // Confidencial
+        if (item.confidencial && !item.isConsolidated) return false;
+        
         // Verifica se o item pertence a um departamento que o usuário gerencia
         let belongsToMyDept = false;
         if (item.allocations && item.allocations.length > 0) {
@@ -525,6 +529,9 @@ const App = () => {
           belongsToMyDept = myManagedDepts.includes(item.departamento);
         }
         if (!belongsToMyDept) return false;
+      } else {
+        // Admin: esconde consolidados da lista para não duplicar visualmente
+        if (item.isConsolidated) return false;
       }
 
       // 2. Filtros Normais de UI
@@ -595,6 +602,7 @@ const App = () => {
       const itemsToProcess = budgetItems.filter(item => {
           // Segurança
           if (!isMaster) {
+            if (item.confidencial && !item.isConsolidated) return false;
             let belongsToMyDept = false;
             if (item.allocations && item.allocations.length > 0) {
               belongsToMyDept = item.allocations.some(a => myManagedDepts.includes(a.department));
@@ -602,7 +610,10 @@ const App = () => {
               belongsToMyDept = myManagedDepts.includes(item.departamento);
             }
             if (!belongsToMyDept) return false;
+          } else {
+             if (item.isConsolidated) return false;
           }
+
           return budgetFilterStatus ? item.status === budgetFilterStatus : true;
       });
 
@@ -640,6 +651,87 @@ const App = () => {
       });
       return max > 0 ? max : 1;
   }, [chartData]);
+
+  // --- Função para Recalcular o Consolidado ---
+  const recalculateConsolidatedItems = async (itemsSnapshot) => {
+    // Apenas Admin roda isso
+    if (!isMaster) return;
+
+    // 1. Pega todos os itens confidenciais
+    const confidentialItems = itemsSnapshot.filter(i => i.confidencial && !i.isConsolidated);
+
+    // 2. Agrupa por mês
+    const byMonth = {};
+    MONTHS.forEach(m => byMonth[m] = []);
+    confidentialItems.forEach(item => {
+        if (byMonth[item.mes]) byMonth[item.mes].push(item);
+    });
+
+    // 3. Para cada mês, calcula e salva/atualiza o item consolidado
+    for (const m of MONTHS) {
+        const itemsInMonth = byMonth[m];
+        
+        // Se não tiver itens confidenciais no mês, precisamos apagar o consolidado se existir? 
+        // Sim, mas para simplificar, se o valor for 0, atualizamos para 0.
+        
+        let totalPrev = 0;
+        let totalReal = 0;
+        let deptMap = {}; // Para calcular allocations consolidadas
+
+        itemsInMonth.forEach(item => {
+            let vPrev = Number(item.valorPrevisto || 0);
+            let vReal = Number(item.valorRealizado || 0);
+            const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
+            vPrev *= rate;
+            vReal *= rate;
+
+            totalPrev += vPrev;
+            totalReal += vReal;
+
+            // Allocations
+            if (item.allocations && item.allocations.length > 0) {
+                item.allocations.forEach(alloc => {
+                    const shareVal = vPrev * (Number(alloc.percent) / 100);
+                    deptMap[alloc.department] = (deptMap[alloc.department] || 0) + shareVal;
+                });
+            } else {
+                const dept = item.departamento || 'Outros';
+                deptMap[dept] = (deptMap[dept] || 0) + vPrev;
+            }
+        });
+
+        // Se total > 0, cria/atualiza
+        if (totalPrev > 0 || totalReal > 0) {
+             // Montar allocations array
+             const consolidatedAllocations = Object.keys(deptMap).map(dept => ({
+                 department: dept,
+                 percent: totalPrev > 0 ? (deptMap[dept] / totalPrev) * 100 : 0
+             }));
+
+             const docId = `consolidated_salary_${m}`;
+             const data = {
+                 titulo: "Folha Salarial / Encargos (Consolidado)",
+                 descricao: "Item automático consolidado de salários confidenciais.",
+                 mes: m,
+                 status: "Orçado", // Padrão
+                 valorPrevisto: totalPrev,
+                 valorRealizado: totalReal,
+                 moeda: 'BRL',
+                 tipoDespesa: "Despesas com Equipe",
+                 categoria: "Salários",
+                 allocations: consolidatedAllocations,
+                 confidencial: false, // Visível para gestores!
+                 isConsolidated: true, // Flag para Admin esconder da lista
+                 updatedAt: new Date().toISOString()
+             };
+             
+             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', docId), data);
+        } else {
+            // Se total for 0, idealmente deletaríamos o doc consolidado para não sujar.
+            // await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', `consolidated_salary_${m}`));
+        }
+    }
+  };
 
   // --- Firebase Effects ---
   useEffect(() => {
@@ -882,6 +974,8 @@ const App = () => {
     if (totalPercent !== 100) return alert("A alocação por departamentos deve somar 100%.");
 
     try {
+        let updatedItems = []; // Para recálculo
+        
         if (editingBudgetId) {
             const data = {
                 titulo: budgetForm.titulo,
@@ -898,6 +992,10 @@ const App = () => {
                 updatedAt: new Date().toISOString()
             };
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', editingBudgetId), data, { merge: true });
+            
+            // Simulação para o recálculo imediato
+            updatedItems = budgetItems.map(i => i.id === editingBudgetId ? {...i, ...data} : i);
+
         } else {
             const batchPromises = budgetForm.selectedMonths.map(month => {
                 const data = {
@@ -917,7 +1015,16 @@ const App = () => {
                 return addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), data);
             });
             await Promise.all(batchPromises);
+            // Recálculo dependerá do snapshot
         }
+        
+        // Dispara recálculo se for master (admin)
+        if (isMaster) {
+           // Pequeno delay para garantir que o snapshot pegou, ou usamos o updatedItems local se edição
+           setTimeout(() => recalculateConsolidatedItems(budgetItems), 1000); 
+           // Nota: em produção ideal usaríamos Cloud Functions
+        }
+
         setIsBudgetModalOpen(false);
     } catch (err) {
         console.error("Error saving budget:", err);
@@ -928,6 +1035,8 @@ const App = () => {
       if (!auth.currentUser) return;
       if (window.confirm("Remover item do orçamento?")) {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', id));
+          // Recalcular após delete
+          if (isMaster) setTimeout(() => recalculateConsolidatedItems(budgetItems.filter(i => i.id !== id)), 1000);
       }
   };
 
@@ -1296,420 +1405,7 @@ const App = () => {
                                     onChange={(e) => setBudgetFilterDept(e.target.value)}
                                     className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
                                 >
-                                    <option value="">{isMaster ? "Todos Deptos." : "Meus Deptos. (Resumo)"}</option>
-                                    {/* Lista todas as opções se for Master, senão lista apenas as permitidas */}
-                                    {(isMaster ? DEPARTMENTS : myManagedDepts).map(d => <option key={d} value={d}>{d}</option>)}
-                                </select>
-                            </div>
-
-                            <div className="relative">
-                                <Filter size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                                <select 
-                                    value={budgetFilterStatus} 
-                                    onChange={(e) => setBudgetFilterStatus(e.target.value)}
-                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
-                                >
-                                    <option value="">Todos Status</option>
-                                    {BUDGET_STATUS.map(s => <option key={s} value={s}>{s}</option>)}
-                                </select>
-                            </div>
-                            
-                            {(budgetFilterMonth || budgetFilterDept || budgetFilterStatus) && (
-                                <button 
-                                    onClick={() => { setBudgetFilterMonth(''); setBudgetFilterDept(''); setBudgetFilterStatus(''); }}
-                                    className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
-                                    title="Limpar Filtros"
-                                >
-                                    <X size={16}/>
-                                </button>
-                            )}
-                        </div>
-                    </div>
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-slate-700">
-                            <thead>
-                                <tr className="bg-slate-50 text-slate-400 text-[10px] font-bold uppercase tracking-widest border-b">
-                                    <SortableBudgetTh label="Descrição" sortKey="titulo" />
-                                    <SortableBudgetTh label="Mês" sortKey="mes" />
-                                    <SortableBudgetTh label="Depto." sortKey="departamento" />
-                                    <SortableBudgetTh label="Status" sortKey="status" center />
-                                    <SortableBudgetTh label="Valor Previsto" sortKey="valorPrevisto" align="right" />
-                                    <SortableBudgetTh label="Valor Realizado" sortKey="valorRealizado" align="right" />
-                                    <SortableBudgetTh label="Saldo" sortKey="saldo" align="right" />
-                                    <th className="px-6 py-4 text-right">Ações</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {filteredBudgetItems.length === 0 ? (
-                                    <tr><td colSpan="8" className="p-12 text-center text-slate-400 italic">Nenhum item orçamentário encontrado.</td></tr>
-                                ) : (
-                                    filteredBudgetItems.map(item => {
-                                        const values = getEffectiveItemValues(item);
-                                        const saldo = values.realizado - values.previsto;
-                                        const hasMultipleDepts = item.allocations && item.allocations.length > 1;
-                                        
-                                        // Texto do departamento
-                                        let deptText = item.departamento || 'N/A';
-                                        if (item.allocations && item.allocations.length > 0) {
-                                            if (budgetFilterDept) {
-                                                deptText = budgetFilterDept;
-                                            } else {
-                                                deptText = hasMultipleDepts ? 'Rateio Múltiplo' : item.allocations[0].department;
-                                            }
-                                        }
-
-                                        return (
-                                        <tr key={item.id} className="hover:bg-slate-50/80 transition-all group">
-                                            <td className="px-6 py-4">
-                                                <div className="font-bold text-[#244C5A]">{item.titulo}</div>
-                                                <div className="text-[9px] font-bold text-slate-300 uppercase">ID: {item.id.slice(0,6)}</div>
-                                            </td>
-                                            <td className="px-6 py-4"><span className="text-xs font-bold bg-[#0097A9]/5 text-[#0097A9] px-3 py-1 rounded-lg">{item.mes}</span></td>
-                                            <td className="px-6 py-4">
-                                                <span className={`text-[10px] font-black uppercase text-slate-400 border border-slate-200 px-2 py-0.5 rounded-md ${hasMultipleDepts && !budgetFilterDept ? 'bg-purple-50 text-purple-600 border-purple-100' : ''}`}>
-                                                    {deptText}
-                                                </span>
-                                                {/* Indicador de Parcela */}
-                                                {!isMaster && values.share < 1 && (
-                                                    <span className="ml-2 text-[9px] font-bold text-[#FFC72C] bg-[#FFC72C]/10 px-1.5 py-0.5 rounded" title="Valor proporcional à sua alocação">
-                                                        {(values.share * 100).toFixed(0)}%
-                                                    </span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4 text-center">
-                                                <span className={`text-[10px] font-black uppercase px-2 py-1 rounded-md ${
-                                                    item.status === 'Realizado' ? 'bg-emerald-100 text-emerald-700' :
-                                                    item.status === 'Cancelado' ? 'bg-red-50 text-red-500' :
-                                                    item.status === 'Extra' ? 'bg-purple-50 text-purple-600' :
-                                                    'bg-slate-100 text-slate-500'
-                                                }`}>{item.status}</span>
-                                            </td>
-                                            <td className="px-6 py-4 text-right font-medium text-slate-600">{formatCurrency(values.previsto, 'BRL')}</td>
-                                            <td className="px-6 py-4 text-right font-bold text-[#244C5A]">{formatCurrency(values.realizado, 'BRL')}</td>
-                                            <td className={`px-6 py-4 text-right font-bold ${saldo > 0 ? 'text-red-500' : saldo < 0 ? 'text-emerald-500' : 'text-slate-300'}`}>
-                                                {formatCurrency(saldo, 'BRL')}
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <div className="flex justify-end gap-1">
-                                                    <button onClick={() => openBudgetModal(item)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-slate-100 rounded-lg"><Edit3 size={16}/></button>
-                                                    <button onClick={() => deleteBudgetItem(item.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    )})
-                                )}
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </main>
-
-            {/* MODAL CONFIGURAÇÃO DE GESTORES (ADMIN ONLY) */}
-            {isSettingsModalOpen && isMaster && (
-              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
-                <div className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden text-left border border-white/20 text-slate-700">
-                  <div className="bg-[#244C5A] p-8 flex justify-between items-center text-white">
-                      <h2 className="text-xl font-black flex items-center gap-3"><Settings/> Configurar Gestores</h2>
-                      <button onClick={() => setIsSettingsModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={24}/></button>
-                  </div>
-                  <div className="p-8 space-y-6">
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Departamento</label>
-                      <select 
-                        value={selectedDeptForConfig} 
-                        onChange={(e) => setSelectedDeptForConfig(e.target.value)}
-                        className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]"
-                      >
-                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                      </select>
-                    </div>
-
-                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
-                       <label className="text-[10px] font-black uppercase text-slate-400 block mb-4 tracking-widest">Gestores Atuais</label>
-                       <div className="space-y-2 mb-4">
-                          {(deptManagers[selectedDeptForConfig] || []).length === 0 ? (
-                            <p className="text-xs text-slate-400 italic">Nenhum gestor vinculado.</p>
-                          ) : (
-                            (deptManagers[selectedDeptForConfig] || []).map(email => (
-                              <div key={email} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200">
-                                <span className="text-xs font-bold text-slate-600">{email}</span>
-                                <button onClick={() => handleRemoveManager(email)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
-                              </div>
-                            ))
-                          )}
-                       </div>
-                       
-                       <div className="flex gap-2">
-                          <input 
-                            type="email" 
-                            placeholder="novo.gestor@arkmeds.com" 
-                            className="flex-1 p-3 text-xs border rounded-xl outline-none focus:border-[#0097A9]"
-                            value={newManagerEmail}
-                            onChange={(e) => setNewManagerEmail(e.target.value)}
-                          />
-                          <button onClick={handleAddManager} className="bg-[#0097A9] text-white p-3 rounded-xl hover:brightness-110"><Plus size={16}/></button>
-                       </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* MODAL ORÇAMENTO */}
-            {isBudgetModalOpen && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
-                    <div className="bg-white w-full max-w-2xl rounded-[40px] shadow-2xl overflow-hidden text-left border border-white/20 text-slate-700">
-                        <div className="bg-[#0097A9] p-8 flex justify-between items-center text-white">
-                            <h2 className="text-2xl font-black flex items-center gap-3"><Wallet/> {editingBudgetId ? 'Editar Item' : 'Novo Lançamento'}</h2>
-                            <button onClick={() => setIsBudgetModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={32}/></button>
-                        </div>
-                        <form onSubmit={handleBudgetSubmit} className="p-10 space-y-6">
-                            <div className="grid grid-cols-2 gap-6">
-                                <div className="col-span-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Título da Despesa</label>
-                                    <input required value={budgetForm.titulo} onChange={e => setBudgetForm({...budgetForm, titulo: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]" placeholder="Ex: Licença de Software" />
-                                </div>
-
-                                <div className="col-span-2">
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Descrição Detalhada</label>
-                                    <textarea value={budgetForm.descricao} onChange={e => setBudgetForm({...budgetForm, descricao: e.target.value})} rows="2" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-sm text-slate-700 resize-none" placeholder="Detalhes adicionais sobre a despesa..." />
-                                </div>
-
-                                {/* COMPONENTE DE ALOCAÇÃO DE DEPARTAMENTOS */}
-                                <div className="col-span-2 bg-slate-50 p-6 rounded-3xl border border-slate-100 text-left">
-                                    <div className="flex items-center justify-between mb-4 text-left text-slate-700">
-                                        <div className="flex items-center gap-2 text-left">
-                                            <Layers size={18} className="text-[#0097A9] text-left"/>
-                                            <label className="text-[10px] font-black uppercase text-[#244C5A] tracking-widest text-left">Departamentos (Max 5)</label>
-                                        </div>
-                                        <button type="button" onClick={addBudgetAllocation} disabled={budgetForm.allocations.length >= 5} className="text-[10px] font-black uppercase text-[#0097A9] hover:bg-[#0097A9]/10 px-3 py-1.5 rounded-xl disabled:opacity-30 text-left">+ Add Departamento</button>
-                                    </div>
-                                    <div className="space-y-3 text-left">
-                                        {budgetForm.allocations.map((alloc, index) => (
-                                            <div key={index} className="flex items-center gap-3 animate-in slide-in-from-left duration-200 text-left">
-                                                <div className="flex-1 text-left">
-                                                    <select value={alloc.department} onChange={e => updateBudgetAllocation(index, 'department', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm text-left text-slate-700">
-                                                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                                                    </select>
-                                                </div>
-                                                <div className="w-24 relative text-left">
-                                                    <input type="number" value={alloc.percent} onChange={e => updateBudgetAllocation(index, 'percent', e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl outline-none text-sm pr-8 font-bold text-[#0097A9] text-left text-slate-700" />
-                                                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400 text-left">%</span>
-                                                </div>
-                                                {budgetForm.allocations.length > 1 && (
-                                                    <button type="button" onClick={() => removeBudgetAllocation(index)} className="text-slate-300 hover:text-red-500 text-left">
-                                                        <MinusCircle size={20} className="text-left"/>
-                                                    </button>
-                                                )}
-                                            </div>
-                                        ))}
-                                    </div>
-                                    <div className="mt-4 flex items-center justify-between border-t pt-3 text-left text-slate-700">
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter text-left">Total</span>
-                                        <div className={`flex items-center gap-2 px-3 py-1 rounded-lg ${budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0) === 100 ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-500'} text-left text-slate-700`}>
-                                            <span className="text-sm font-black text-left">{budgetForm.allocations.reduce((sum, a) => sum + Number(a.percent), 0)}%</span>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Moeda</label>
-                                    <div className="flex bg-slate-50 p-1 rounded-2xl border border-slate-200">
-                                        {CURRENCIES.map(c => (
-                                            <button 
-                                                key={c.value}
-                                                type="button"
-                                                onClick={() => setBudgetForm({...budgetForm, moeda: c.value})}
-                                                className={`flex-1 py-3 rounded-xl font-bold text-xs transition-all ${
-                                                    budgetForm.moeda === c.value
-                                                    ? 'bg-[#0097A9] text-white shadow-md'
-                                                    : 'text-slate-400 hover:text-slate-600'
-                                                }`}
-                                            >
-                                                {c.label}
-                                            </button>
-                                        ))}
-                                    </div>
-                                </div>
-
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Tipo de Despesa</label>
-                                    <select value={budgetForm.tipoDespesa} onChange={e => setBudgetForm({...budgetForm, tipoDespesa: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
-                                        {EXPENSE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                </div>
-
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Categoria</label>
-                                    <select value={budgetForm.categoria} onChange={e => setBudgetForm({...budgetForm, categoria: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-slate-700">
-                                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                                    </select>
-                                </div>
-
-                                {/* Checkbox Confidencial (Apenas Admin) */}
-                                {isMaster && (
-                                  <div className="col-span-2 flex items-center gap-3 p-4 bg-red-50 rounded-2xl border border-red-100">
-                                      <input 
-                                        type="checkbox" 
-                                        id="confidencialCheck" 
-                                        checked={budgetForm.confidencial}
-                                        onChange={(e) => setBudgetForm({...budgetForm, confidencial: e.target.checked})}
-                                        className="w-5 h-5 accent-red-600"
-                                      />
-                                      <label htmlFor="confidencialCheck" className="text-sm font-bold text-red-800 flex items-center gap-2 cursor-pointer">
-                                        <Lock size={16}/> Item Confidencial (Invisível para Gestores)
-                                      </label>
-                                  </div>
-                                )}
-                            </div>
-                            
-                            <div>
-                                <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Mês de Referência (Múltipla Seleção)</label>
-                                <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                                    {MONTHS.map(m => (
-                                        <button 
-                                            key={m} 
-                                            type="button" 
-                                            onClick={() => toggleBudgetMonth(m)}
-                                            className={`text-[10px] font-bold uppercase py-2 rounded-xl transition-all border ${
-                                                budgetForm.selectedMonths.includes(m) 
-                                                ? 'bg-[#0097A9] text-white border-[#0097A9] shadow-md transform scale-105' 
-                                                : 'bg-white text-slate-400 border-slate-200 hover:border-[#0097A9] hover:text-[#0097A9]'
-                                            }`}
-                                        >
-                                            {m.substring(0, 3)}
-                                        </button>
-                                    ))}
-                                </div>
-                                {!editingBudgetId && <p className="text-[10px] text-slate-400 mt-2 italic">* Selecionar múltiplos meses criará itens individuais para cada mês.</p>}
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-6">
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Valor Previsto</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
-                                            {budgetForm.moeda === 'USD' ? '$' : 'R$'}
-                                        </span>
-                                        <input required type="number" step="0.01" value={budgetForm.valorPrevisto} onChange={e => setBudgetForm({...budgetForm, valorPrevisto: e.target.value})} className="w-full pl-10 pr-4 py-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-slate-700" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Valor Realizado</label>
-                                    <div className="relative">
-                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm">
-                                            {budgetForm.moeda === 'USD' ? '$' : 'R$'}
-                                        </span>
-                                        <input type="number" step="0.01" value={budgetForm.valorRealizado} onChange={e => setBudgetForm({...budgetForm, valorRealizado: e.target.value})} className="w-full pl-10 pr-4 py-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]" />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Status</label>
-                                <div className="flex flex-wrap gap-2">
-                                    {BUDGET_STATUS.map(status => (
-                                        <button 
-                                            key={status} 
-                                            type="button" 
-                                            onClick={() => setBudgetForm({...budgetForm, status})}
-                                            className={`flex-1 py-3 rounded-2xl font-bold text-xs uppercase transition-all border ${
-                                                budgetForm.status === status
-                                                ? 'bg-[#FFC72C] text-[#244C5A] border-[#FFC72C] shadow-sm'
-                                                : 'bg-white text-slate-400 border-slate-200 hover:bg-slate-50'
-                                            }`}
-                                        >
-                                            {status}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl hover:bg-[#0097A9] transition-all flex items-center justify-center gap-2">
-                                <Save size={20}/> {editingBudgetId ? 'Atualizar Item' : 'Salvar Lançamentos'}
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            )}
-        </div>
-      );
-  }
-
-  if (view === 'home' && (isMaster || isPreviewBypass || isDeptManager)) {
-      return (
-        <div className="min-h-screen bg-[#F8FAFB] text-left pb-20" style={{ fontFamily: 'Montserrat, sans-serif' }}>
-            <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700 sticky top-0 z-30">
-                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
-                <div className="flex items-center gap-4">
-                    {/* Botão de Configuração de Gestores (Apenas Admin) */}
-                    {isMaster && (
-                      <button 
-                        onClick={() => setIsSettingsModalOpen(true)}
-                        className="bg-slate-100 text-slate-500 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center gap-2"
-                        title="Configurar Gestores"
-                      >
-                        <Settings size={18}/>
-                      </button>
-                    )}
-                    <button onClick={() => openBudgetModal()} className="bg-[#FFC72C] text-[#244C5A] px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-105 transition-all flex items-center gap-2"><PlusCircle size={18}/> Novo Item</button>
-                    <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
-                </div>
-            </nav>
-            <main className="max-w-7xl mx-auto p-10">
-                <div className="bg-[#244C5A] text-white p-10 rounded-[40px] shadow-2xl mb-12 relative overflow-hidden">
-                    <div className="relative z-10 flex flex-col md:flex-row justify-between items-end gap-6">
-                        <div>
-                            <div className="flex items-center gap-3 text-[#FFC72C] mb-2 uppercase text-[10px] font-black tracking-widest"><TrendingUp size={16}/> Financeiro</div>
-                            <h1 className="text-4xl font-black mb-2">Gestão de Orçamento</h1>
-                            <p className="text-white/60">Acompanhamento de previsões e realizações mensais.</p>
-                        </div>
-                        <div className="flex gap-4">
-                            <div className="text-right">
-                                <p className="text-[10px] font-bold text-[#FFC72C] uppercase tracking-widest">Total Previsto (R$)</p>
-                                <p className="text-2xl font-black">{formatCurrency(budgetStats.totalPrevisto, 'BRL')}</p>
-                                {budgetStats.totalPrevisto > 0 && <p className="text-[10px] text-white/30 italic mt-1 font-bold">Consolidado @ 5.5</p>}
-                            </div>
-                            <div className="w-px bg-white/10"></div>
-                            <div className="text-right">
-                                <p className="text-[10px] font-bold text-[#0097A9] uppercase tracking-widest">Total Realizado (R$)</p>
-                                <p className="text-2xl font-black">{formatCurrency(budgetStats.totalRealizado, 'BRL')}</p>
-                            </div>
-                        </div>
-                    </div>
-                    {/* Gráfico de Barras */}
-                    <BudgetBarChart data={chartData} maxValue={chartMaxValue} />
-                </div>
-
-                <div className="bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100">
-                    <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-50/50">
-                        <div className="flex items-center gap-2">
-                            <h3 className="font-bold text-[#244C5A] flex items-center gap-2"><ListFilter size={18}/> Itens do Orçamento</h3>
-                            <div className="text-[10px] font-black text-slate-300 uppercase tracking-widest bg-white px-2 py-1 rounded-md border border-slate-100">{filteredBudgetItems.length}</div>
-                        </div>
-                        
-                        {/* Filtros */}
-                        <div className="flex flex-wrap gap-2 w-full md:w-auto">
-                            <div className="relative">
-                                <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                                <select 
-                                    value={budgetFilterMonth} 
-                                    onChange={(e) => setBudgetFilterMonth(e.target.value)}
-                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
-                                >
-                                    <option value="">Todos os Meses</option>
-                                    {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
-                                </select>
-                            </div>
-
-                            <div className="relative">
-                                <Layers size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
-                                <select 
-                                    value={budgetFilterDept} 
-                                    onChange={(e) => setBudgetFilterDept(e.target.value)}
-                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
-                                >
-                                    <option value="">{isMaster ? "Todos Deptos." : "Meus Deptos. (Resumo)"}</option>
+                                    <option value="">{isMaster ? "Todos Deptos." : "Resumo dos Meus Deptos."}</option>
                                     {/* Lista todas as opções se for Master, senão lista apenas as permitidas */}
                                     {(isMaster ? DEPARTMENTS : myManagedDepts).map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
