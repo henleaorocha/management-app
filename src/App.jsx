@@ -364,8 +364,15 @@ const App = () => {
   };
 
   // --- Memos ---
-  // AQUI É A CORREÇÃO PRINCIPAL DO BYPASS:
   const isMaster = useMemo(() => isPreviewBypass || user?.email?.toLowerCase() === MASTER_EMAIL.toLowerCase(), [user, isPreviewBypass]);
+
+  // Memo para verificar se o usuário é gestor de algum departamento
+  const isDeptManager = useMemo(() => {
+    if (!user || !deptManagers) return false;
+    return Object.values(deptManagers).some(emails => 
+      Array.isArray(emails) && emails.map(e => e.toLowerCase()).includes(user.email?.toLowerCase())
+    );
+  }, [user, deptManagers]);
 
   const specificOneOnOnes = useMemo(() => {
     if (!selectedEmpFor1on1) return [];
@@ -441,9 +448,6 @@ const App = () => {
 
   const filteredBudgetItems = useMemo(() => {
     let items = budgetItems.filter(item => {
-      // NOTA: Removido filtro de segurança por enquanto (solicitação do usuário)
-      // O Admin vê tudo e o Gestor também (por enquanto)
-
       // Filtros Normais de UI
       const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
       const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
@@ -662,7 +666,8 @@ const App = () => {
   };
 
   const handleEnterHub = () => {
-    if (isMaster || isPreviewBypass) setView('selection');
+    // Redireciona para Selection se for Master ou Gestor de Departamento
+    if (isMaster || isPreviewBypass || isDeptManager) setView('selection');
     else setView('crud'); 
   };
 
@@ -1003,7 +1008,7 @@ const App = () => {
       );
   }
 
-  if (view === 'selection' && (isMaster || isPreviewBypass)) {
+  if (view === 'selection' && (isMaster || isPreviewBypass || isDeptManager)) {
     return (
       <div className="min-h-screen bg-[#F8FAFB] flex flex-col items-center justify-center p-8 text-left animate-in slide-in-from-bottom-4 duration-500" style={{ fontFamily: 'Montserrat, sans-serif' }}>
         <div className="max-w-4xl w-full">
@@ -1158,11 +1163,11 @@ const App = () => {
       );
   }
 
-  if (view === 'home' && (isMaster || isPreviewBypass)) {
+  if (view === 'home' && (isMaster || isPreviewBypass || isDeptManager)) {
       return (
         <div className="min-h-screen bg-[#F8FAFB] text-left pb-20" style={{ fontFamily: 'Montserrat, sans-serif' }}>
             <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700 sticky top-0 z-30">
-                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
+                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" />{(isMaster || isPreviewBypass || isDeptManager) && (<button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><LayoutDashboard size={18}/> Menu Principal</button>)}</div>
                 <div className="flex items-center gap-4">
                     {/* Botão de Configuração de Gestores (Apenas Admin) */}
                     {isMaster && (
