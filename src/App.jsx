@@ -374,6 +374,18 @@ const App = () => {
     );
   }, [user, deptManagers]);
 
+  // Memo para obter a lista de departamentos que o usuário logado gerencia
+  const myManagedDepts = useMemo(() => {
+    if (isMaster) return DEPARTMENTS; // Master gerencia tudo
+    const myDepts = [];
+    Object.entries(deptManagers).forEach(([dept, emails]) => {
+      if (emails && Array.isArray(emails) && emails.map(e => e.toLowerCase()).includes(user?.email?.toLowerCase())) {
+        myDepts.push(dept);
+      }
+    });
+    return myDepts;
+  }, [user, deptManagers, isMaster]);
+
   const specificOneOnOnes = useMemo(() => {
     if (!selectedEmpFor1on1) return [];
     return globalOneOnOnes
@@ -448,7 +460,19 @@ const App = () => {
 
   const filteredBudgetItems = useMemo(() => {
     let items = budgetItems.filter(item => {
-      // Filtros Normais de UI
+      // 1. Filtro de Segurança / Row-Level Security
+      if (!isMaster) {
+        // Verifica se o item pertence a um departamento que o usuário gerencia
+        let belongsToMyDept = false;
+        if (item.allocations && item.allocations.length > 0) {
+          belongsToMyDept = item.allocations.some(a => myManagedDepts.includes(a.department));
+        } else {
+          belongsToMyDept = myManagedDepts.includes(item.departamento);
+        }
+        if (!belongsToMyDept) return false;
+      }
+
+      // 2. Filtros Normais de UI
       const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
       const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
       
@@ -499,7 +523,7 @@ const App = () => {
     });
 
     return items;
-  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig]);
+  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig, isMaster, myManagedDepts]);
 
   // Cálculo para o Gráfico e Totalizadores
   const chartData = useMemo(() => {
@@ -507,6 +531,17 @@ const App = () => {
       const data = MONTHS.map(m => ({ mes: m, previsto: 0, realizado: 0 }));
       
       const itemsToProcess = budgetItems.filter(item => {
+          // Segurança
+          if (!isMaster) {
+            let belongsToMyDept = false;
+            if (item.allocations && item.allocations.length > 0) {
+              belongsToMyDept = item.allocations.some(a => myManagedDepts.includes(a.department));
+            } else {
+              belongsToMyDept = myManagedDepts.includes(item.departamento);
+            }
+            if (!belongsToMyDept) return false;
+          }
+          // Filtro de Status
           return budgetFilterStatus ? item.status === budgetFilterStatus : true;
       });
 
@@ -539,7 +574,7 @@ const App = () => {
       });
 
       return data;
-  }, [budgetItems, budgetFilterDept, budgetFilterStatus]);
+  }, [budgetItems, budgetFilterDept, budgetFilterStatus, isMaster, myManagedDepts]);
 
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
@@ -666,7 +701,6 @@ const App = () => {
   };
 
   const handleEnterHub = () => {
-    // Redireciona para Selection se for Master ou Gestor de Departamento
     if (isMaster || isPreviewBypass || isDeptManager) setView('selection');
     else setView('crud'); 
   };
@@ -1167,7 +1201,7 @@ const App = () => {
       return (
         <div className="min-h-screen bg-[#F8FAFB] text-left pb-20" style={{ fontFamily: 'Montserrat, sans-serif' }}>
             <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700 sticky top-0 z-30">
-                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" />{(isMaster || isPreviewBypass || isDeptManager) && (<button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><LayoutDashboard size={18}/> Menu Principal</button>)}</div>
+                <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
                 <div className="flex items-center gap-4">
                     {/* Botão de Configuração de Gestores (Apenas Admin) */}
                     {isMaster && (
@@ -1649,7 +1683,7 @@ const App = () => {
                     {specificOneOnOnes.map((item) => {
                         const sent = SENTIMENTS.find(s => s.value === item.sentimento) || SENTIMENTS[2];
                         const isDone = item.status === 'Finalizada';
-                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left text-slate-700"><div className="flex justify-between items-start mb-3 text-left"><div><div className="flex items-center gap-2 mb-1 text-left"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'} text-left`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase text-left">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color} text-left`} title={sent.label}><sent.icon size={18} text-left/></div ></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap text-left">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50 text-left"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 text-left"><Calendar size={10} text-left/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all text-left text-slate-700"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600 text-left"><CheckCircle2 size={14} text-left/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9] text-left"><Edit3 size={14} text-left/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500 text-left"><Trash2 size={14} text-left/></button></div></div></div>);
+                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left text-slate-700"><div className="flex justify-between items-start mb-3 text-left"><div><div className="flex items-center gap-2 mb-1 text-left"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'} text-left`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase text-left">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color} text-left`} title={sent.label}><sent.icon size={18} text-left/></div></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap text-left">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50 text-left"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 text-left"><Calendar size={10} text-left/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all text-left text-slate-700"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600 text-left"><CheckCircle2 size={14} text-left/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9] text-left"><Edit3 size={14} text-left/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500 text-left"><Trash2 size={14} text-left/></button></div></div></div>);
                     })}
                   </div>
                </div>
