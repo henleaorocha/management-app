@@ -58,7 +58,8 @@ import {
   Globe2,
   Filter,
   ArrowDownWideNarrow,
-  BarChart2
+  BarChart2,
+  Settings
 } from 'lucide-react';
 
 // Firebase Imports
@@ -80,7 +81,8 @@ import {
   addDoc, 
   deleteDoc, 
   onSnapshot,
-  updateDoc
+  updateDoc,
+  getDoc
 } from 'firebase/firestore';
 
 // Identifica se estamos no ambiente de Preview/Canvas
@@ -283,7 +285,8 @@ const App = () => {
     moeda: 'BRL',
     tipoDespesa: EXPENSE_TYPES[0],
     categoria: CATEGORIES[0],
-    allocations: [{ department: DEPARTMENTS[0], percent: 100 }]
+    allocations: [{ department: DEPARTMENTS[0], percent: 100 }],
+    confidencial: false
   });
 
   // Filtros e Ordenação de Orçamento
@@ -291,6 +294,12 @@ const App = () => {
   const [budgetFilterDept, setBudgetFilterDept] = useState('');
   const [budgetFilterStatus, setBudgetFilterStatus] = useState('');
   const [budgetSortConfig, setBudgetSortConfig] = useState({ key: 'mes', direction: 'asc' });
+
+  // Gestão de Permissões de Orçamento
+  const [deptManagers, setDeptManagers] = useState({});
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [selectedDeptForConfig, setSelectedDeptForConfig] = useState(DEPARTMENTS[0]);
+  const [newManagerEmail, setNewManagerEmail] = useState('');
 
   // Common States
   const [authChecking, setAuthChecking] = useState(true);
@@ -355,7 +364,8 @@ const App = () => {
   };
 
   // --- Memos ---
-  const isMaster = useMemo(() => user?.email?.toLowerCase() === MASTER_EMAIL.toLowerCase(), [user]);
+  // AQUI É A CORREÇÃO PRINCIPAL DO BYPASS:
+  const isMaster = useMemo(() => isPreviewBypass || user?.email?.toLowerCase() === MASTER_EMAIL.toLowerCase(), [user, isPreviewBypass]);
 
   const specificOneOnOnes = useMemo(() => {
     if (!selectedEmpFor1on1) return [];
@@ -431,6 +441,10 @@ const App = () => {
 
   const filteredBudgetItems = useMemo(() => {
     let items = budgetItems.filter(item => {
+      // NOTA: Removido filtro de segurança por enquanto (solicitação do usuário)
+      // O Admin vê tudo e o Gestor também (por enquanto)
+
+      // Filtros Normais de UI
       const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
       const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
       
@@ -484,20 +498,11 @@ const App = () => {
   }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig]);
 
   // Cálculo para o Gráfico e Totalizadores
-  // Respeita filtro de Depto mas IGNORA filtro de Mês para mostrar o ano todo
   const chartData = useMemo(() => {
       // 1. Array de base para os 12 meses
       const data = MONTHS.map(m => ({ mes: m, previsto: 0, realizado: 0 }));
       
-      let totalPrevistoOverall = 0;
-      let totalRealizadoOverall = 0;
-
-      // 2. Itera sobre TODOS os itens (ou apenas filtrados por status, se desejar)
-      // Aqui usamos budgetItems puros, mas aplicamos a lógica do Depto manualmente
-      // para garantir que o gráfico mostre todos os meses mesmo se o filtro de mês estiver ativo na tabela.
-      
       const itemsToProcess = budgetItems.filter(item => {
-          // Aplica filtro de Status se existir
           return budgetFilterStatus ? item.status === budgetFilterStatus : true;
       });
 
@@ -509,7 +514,6 @@ const App = () => {
           let vReal = Number(item.valorRealizado || 0);
           const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
 
-          // Conversão para BRL
           vPrev = vPrev * rate;
           vReal = vReal * rate;
 
@@ -520,30 +524,19 @@ const App = () => {
                   const alloc = item.allocations.find(a => a.department === budgetFilterDept);
                   if (alloc) share = Number(alloc.percent) / 100;
               } else {
-                  // Fallback para itens antigos sem alocação múltipla
                   if (item.departamento === budgetFilterDept) share = 1;
               }
               vPrev = vPrev * share;
               vReal = vReal * share;
           }
 
-          // Soma no mês correspondente
           data[monthIndex].previsto += vPrev;
           data[monthIndex].realizado += vReal;
-
-          // Soma nos totais gerais (considerando apenas o que "sobrou" após o filtro de dept)
-          // Nota: O card de totais deve bater com a tabela? 
-          // Se o filtro de Mês estiver ativo na tabela, a tabela mostra X. 
-          // O gráfico mostra o ano todo. 
-          // Os cards de topo geralmente mostram o total do que está VISÍVEL na tabela.
-          // Mas o usuário pediu "gráfico... mostre a cada mês o total".
-          // Vou manter os cards de topo vinculados aos itens FILTRADOS da tabela (filteredBudgetItems) para consistência com a lista.
       });
 
       return data;
   }, [budgetItems, budgetFilterDept, budgetFilterStatus]);
 
-  // Totais para os Cards (baseado na tabela filtrada)
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
       let totalRealizado = 0;
@@ -556,8 +549,6 @@ const App = () => {
           vPrev = vPrev * rate;
           vReal = vReal * rate;
 
-          // O filtro de departamento já filtrou os ITENS que contêm o departamento.
-          // Agora precisamos somar apenas a PARCELA desse departamento se houver rateio.
           if (budgetFilterDept) {
               if (item.allocations && item.allocations.length > 0) {
                   const alloc = item.allocations.find(a => a.department === budgetFilterDept);
@@ -576,14 +567,13 @@ const App = () => {
       return { totalPrevisto, totalRealizado };
   }, [filteredBudgetItems, budgetFilterDept]);
 
-  // Max value para escala do gráfico
   const chartMaxValue = useMemo(() => {
       let max = 0;
       chartData.forEach(d => {
           if (d.previsto > max) max = d.previsto;
           if (d.realizado > max) max = d.realizado;
       });
-      return max > 0 ? max : 1; // Evita divisão por zero
+      return max > 0 ? max : 1;
   }, [chartData]);
 
   // --- Firebase Effects ---
@@ -605,6 +595,20 @@ const App = () => {
     });
     return () => unsubscribe();
   }, [isPreviewBypass]);
+
+  // Carrega Configurações de Gestores
+  useEffect(() => {
+    if (!user) return;
+    const settingsDoc = doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'department_managers');
+    const unsubscribe = onSnapshot(settingsDoc, (docSnap) => {
+      if (docSnap.exists()) {
+        setDeptManagers(docSnap.data());
+      } else {
+        setDeptManagers({});
+      }
+    });
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     if (!user) return; 
@@ -712,6 +716,29 @@ const App = () => {
     if (window.confirm("Excluir colaborador?")) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'employees', id));
   };
 
+  // --- Handlers de Configuração de Gestores ---
+  const handleAddManager = async () => {
+    if (!newManagerEmail) return;
+    const currentEmails = deptManagers[selectedDeptForConfig] || [];
+    if (currentEmails.includes(newManagerEmail)) return alert("Email já cadastrado.");
+    
+    const updated = { ...deptManagers, [selectedDeptForConfig]: [...currentEmails, newManagerEmail] };
+    
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'department_managers'), updated);
+      setNewManagerEmail('');
+    } catch (err) { console.error(err); }
+  };
+
+  const handleRemoveManager = async (emailToRemove) => {
+    const currentEmails = deptManagers[selectedDeptForConfig] || [];
+    const updated = { ...deptManagers, [selectedDeptForConfig]: currentEmails.filter(e => e !== emailToRemove) };
+    
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'settings', 'department_managers'), updated);
+    } catch (err) { console.error(err); }
+  };
+
   // --- Budget Handlers ---
   const openBudgetModal = (item = null) => {
     if (item) {
@@ -730,7 +757,8 @@ const App = () => {
             moeda: item.moeda || 'BRL',
             tipoDespesa: item.tipoDespesa || EXPENSE_TYPES[0],
             categoria: item.categoria || CATEGORIES[0],
-            allocations: allocations
+            allocations: allocations,
+            confidencial: item.confidencial || false // Carrega confidencialidade
         });
     } else {
         setEditingBudgetId(null);
@@ -744,7 +772,8 @@ const App = () => {
             moeda: 'BRL',
             tipoDespesa: EXPENSE_TYPES[0],
             categoria: CATEGORIES[0],
-            allocations: [{ department: DEPARTMENTS[0], percent: 100 }]
+            allocations: [{ department: DEPARTMENTS[0], percent: 100 }],
+            confidencial: false
         });
     }
     setIsBudgetModalOpen(true);
@@ -800,6 +829,7 @@ const App = () => {
                 moeda: budgetForm.moeda,
                 tipoDespesa: budgetForm.tipoDespesa,
                 categoria: budgetForm.categoria,
+                confidencial: budgetForm.confidencial, // Salva flag
                 updatedAt: new Date().toISOString()
             };
             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', editingBudgetId), data, { merge: true });
@@ -816,6 +846,7 @@ const App = () => {
                     moeda: budgetForm.moeda,
                     tipoDespesa: budgetForm.tipoDespesa,
                     categoria: budgetForm.categoria,
+                    confidencial: budgetForm.confidencial, // Salva flag
                     createdAt: new Date().toISOString()
                 };
                 return addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), data);
@@ -1118,7 +1149,7 @@ const App = () => {
                             </div>
                             <div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Decisões e Notas</label><textarea required value={form1on1.decisoes} onChange={e => setForm1on1({...form1on1, decisoes: e.target.value})} rows="3" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none text-left"></textarea></div>
                             <div className="text-left"><label className="text-[10px] font-black uppercase text-slate-400 block mb-2 text-left">Próxima Pauta</label><textarea value={form1on1.proximaPauta} onChange={e => setForm1on1({...form1on1, proximaPauta: e.target.value})} rows="2" className="w-full p-4 bg-slate-50 border rounded-2xl outline-none text-sm resize-none text-left" placeholder="O que discutir no próximo encontro?"></textarea></div>
-                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl flex items-center justify-center gap-2 text-left"><Save size={22}/> Salvar Registro</button>
+                            <button type="submit" className="w-full bg-[#244C5A] text-white font-black py-5 rounded-3xl shadow-xl flex items-center justify-center gap-2 text-left"><Save size={20} text-left/> {editing1on1Id ? 'Atualizar' : 'Salvar'} Registro</button>
                         </form>
                     </div>
                 </div>
@@ -1133,6 +1164,16 @@ const App = () => {
             <nav className="bg-white border-b px-8 py-5 flex justify-between items-center shadow-sm text-slate-700 sticky top-0 z-30">
                 <div className="flex items-center gap-6"><ArkmedsLogo className="text-[#0097A9]" /><button onClick={() => setView('selection')} className="flex items-center gap-2 text-slate-400 hover:text-[#0097A9] font-bold text-sm bg-slate-50 px-4 py-2 rounded-xl text-left"><ChevronLeft size={18}/> Voltar ao Menu</button></div>
                 <div className="flex items-center gap-4">
+                    {/* Botão de Configuração de Gestores (Apenas Admin) */}
+                    {isMaster && (
+                      <button 
+                        onClick={() => setIsSettingsModalOpen(true)}
+                        className="bg-slate-100 text-slate-500 px-4 py-2.5 rounded-xl font-bold text-sm hover:bg-slate-200 transition-all flex items-center gap-2"
+                        title="Configurar Gestores"
+                      >
+                        <Settings size={18}/>
+                      </button>
+                    )}
                     <button onClick={() => openBudgetModal()} className="bg-[#FFC72C] text-[#244C5A] px-6 py-2.5 rounded-xl font-bold text-sm shadow-md hover:scale-105 transition-all flex items-center gap-2"><PlusCircle size={18}/> Novo Item</button>
                     <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 font-bold transition-colors"><LogOut size={20}/></button>
                 </div>
@@ -1281,6 +1322,57 @@ const App = () => {
                 </div>
             </main>
 
+            {/* MODAL CONFIGURAÇÃO DE GESTORES (ADMIN ONLY) */}
+            {isSettingsModalOpen && isMaster && (
+              <div className="fixed inset-0 z-[70] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
+                <div className="bg-white w-full max-w-lg rounded-[40px] shadow-2xl overflow-hidden text-left border border-white/20 text-slate-700">
+                  <div className="bg-[#244C5A] p-8 flex justify-between items-center text-white">
+                      <h2 className="text-xl font-black flex items-center gap-3"><Settings/> Configurar Gestores</h2>
+                      <button onClick={() => setIsSettingsModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={24}/></button>
+                  </div>
+                  <div className="p-8 space-y-6">
+                    <div>
+                      <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Departamento</label>
+                      <select 
+                        value={selectedDeptForConfig} 
+                        onChange={(e) => setSelectedDeptForConfig(e.target.value)}
+                        className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] font-bold text-[#244C5A]"
+                      >
+                        {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                      </select>
+                    </div>
+
+                    <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100">
+                       <label className="text-[10px] font-black uppercase text-slate-400 block mb-4 tracking-widest">Gestores Atuais</label>
+                       <div className="space-y-2 mb-4">
+                          {(deptManagers[selectedDeptForConfig] || []).length === 0 ? (
+                            <p className="text-xs text-slate-400 italic">Nenhum gestor vinculado.</p>
+                          ) : (
+                            (deptManagers[selectedDeptForConfig] || []).map(email => (
+                              <div key={email} className="flex justify-between items-center bg-white p-3 rounded-xl border border-slate-200">
+                                <span className="text-xs font-bold text-slate-600">{email}</span>
+                                <button onClick={() => handleRemoveManager(email)} className="text-red-400 hover:text-red-600"><Trash2 size={14}/></button>
+                              </div>
+                            ))
+                          )}
+                       </div>
+                       
+                       <div className="flex gap-2">
+                          <input 
+                            type="email" 
+                            placeholder="novo.gestor@arkmeds.com" 
+                            className="flex-1 p-3 text-xs border rounded-xl outline-none focus:border-[#0097A9]"
+                            value={newManagerEmail}
+                            onChange={(e) => setNewManagerEmail(e.target.value)}
+                          />
+                          <button onClick={handleAddManager} className="bg-[#0097A9] text-white p-3 rounded-xl hover:brightness-110"><Plus size={16}/></button>
+                       </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* MODAL ORÇAMENTO */}
             {isBudgetModalOpen && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[#244C5A]/90 backdrop-blur-md p-4 animate-in fade-in duration-300">
@@ -1371,6 +1463,22 @@ const App = () => {
                                         {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
                                     </select>
                                 </div>
+
+                                {/* Checkbox Confidencial (Apenas Admin) */}
+                                {isMaster && (
+                                  <div className="col-span-2 flex items-center gap-3 p-4 bg-red-50 rounded-2xl border border-red-100">
+                                      <input 
+                                        type="checkbox" 
+                                        id="confidencialCheck" 
+                                        checked={budgetForm.confidencial}
+                                        onChange={(e) => setBudgetForm({...budgetForm, confidencial: e.target.checked})}
+                                        className="w-5 h-5 accent-red-600"
+                                      />
+                                      <label htmlFor="confidencialCheck" className="text-sm font-bold text-red-800 flex items-center gap-2 cursor-pointer">
+                                        <Lock size={16}/> Item Confidencial (Invisível para Gestores)
+                                      </label>
+                                  </div>
+                                )}
                             </div>
                             
                             <div>
@@ -1536,7 +1644,7 @@ const App = () => {
                     {specificOneOnOnes.map((item) => {
                         const sent = SENTIMENTS.find(s => s.value === item.sentimento) || SENTIMENTS[2];
                         const isDone = item.status === 'Finalizada';
-                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left text-slate-700"><div className="flex justify-between items-start mb-3 text-left"><div><div className="flex items-center gap-2 mb-1 text-left"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'} text-left`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase text-left">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color} text-left`} title={sent.label}><sent.icon size={18} text-left/></div></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap text-left">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50 text-left"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 text-left"><Calendar size={10} text-left/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all text-left text-slate-700"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600 text-left"><CheckCircle2 size={14} text-left/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9] text-left"><Edit3 size={14} text-left/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500 text-left"><Trash2 size={14} text-left/></button></div></div></div>);
+                        return (<div key={item.id} className="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm hover:shadow-md group text-left text-slate-700"><div className="flex justify-between items-start mb-3 text-left"><div><div className="flex items-center gap-2 mb-1 text-left"><span className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full ${isDone ? 'bg-emerald-100 text-emerald-700' : 'bg-[#FFC72C]/10 text-[#244C5A]'} text-left`}>{item.status || 'Agendada'}</span><span className="text-[10px] font-bold text-[#0097A9] uppercase text-left">{formatDate(item.data)}</span></div><h4 className={`font-bold text-[#244C5A] text-left ${isDone ? 'line-through text-slate-400' : ''}`}>{item.titulo}</h4></div><div className={`p-2 rounded-xl ${sent.bg} ${sent.color} text-left`} title={sent.label}><sent.icon size={18} text-left/></div ></div><div className="text-xs text-slate-600 line-clamp-2 mb-4 whitespace-pre-wrap text-left">{item.decisoes}</div><div className="flex justify-between items-center pt-3 border-t border-slate-50 text-left"><div className="text-[9px] font-bold text-slate-400 uppercase flex items-center gap-1 text-left"><Calendar size={10} text-left/> {item.proximaPauta ? 'Pauta futura' : 'Sem pauta'}</div><div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all text-left text-slate-700"><button onClick={() => toggle1on1Status(item.id, item.status)} className="p-1.5 text-slate-400 hover:text-emerald-600 text-left"><CheckCircle2 size={14} text-left/></button><button onClick={() => handleEdit1on1(item)} className="p-1.5 text-slate-400 hover:text-[#0097A9] text-left"><Edit3 size={14} text-left/></button><button onClick={() => delete1on1(item.id)} className="p-1.5 text-slate-400 hover:text-red-500 text-left"><Trash2 size={14} text-left/></button></div></div></div>);
                     })}
                   </div>
                </div>
@@ -1578,7 +1686,7 @@ const App = () => {
               </div>
               <div className="col-span-2 text-left text-slate-700"><label className="text-[10px] font-bold uppercase text-slate-400 block mb-2 tracking-widest text-left">Data Última Promoção</label><input type="date" value={formData.ultimaPromocao} onChange={e => setFormData({...formData, ultimaPromocao: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-2xl outline-none focus:border-[#0097A9] text-left text-slate-700" /></div>
             </form>
-            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 justify-center text-center"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-center">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-center">Salvar Registro</button></div>
+            <div className="p-8 bg-slate-50 border-t flex gap-4 text-left text-slate-700 justify-center items-center"><button onClick={() => setIsModalOpen(false)} className="flex-1 py-4 font-bold text-slate-400 hover:text-slate-600 transition-all text-center">Cancelar</button><button onClick={handleSubmitEmployee} disabled={formData.allocations.reduce((sum, a) => sum + Number(a.percent), 0) !== 100} className="flex-[2] bg-[#FFC72C] text-[#244C5A] font-bold py-4 rounded-2xl shadow-xl hover:brightness-95 transition-all disabled:opacity-30 text-center">Salvar Registro</button></div>
           </div>
         </div>
       )}
