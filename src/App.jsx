@@ -60,7 +60,8 @@ import {
   ArrowDownWideNarrow,
   BarChart2,
   Settings,
-  PieChart as PieChartIcon
+  PieChart as PieChartIcon,
+  Tag // Importado para o ícone de categoria
 } from 'lucide-react';
 
 // Firebase Imports
@@ -297,6 +298,8 @@ const App = () => {
   const [budgetFilterMonth, setBudgetFilterMonth] = useState('');
   const [budgetFilterDept, setBudgetFilterDept] = useState('');
   const [budgetFilterStatus, setBudgetFilterStatus] = useState('');
+  const [budgetFilterCategories, setBudgetFilterCategories] = useState([]); // Novo Filtro
+  const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false); // Estado do dropdown
   const [budgetSortConfig, setBudgetSortConfig] = useState({ key: 'mes', direction: 'asc' });
 
   // Gestão de Permissões de Orçamento
@@ -540,6 +543,7 @@ const App = () => {
       // 2. Filtros Normais de UI
       const matchMonth = budgetFilterMonth ? item.mes === budgetFilterMonth : true;
       const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
+      const matchCategory = budgetFilterCategories.length > 0 ? budgetFilterCategories.includes(item.categoria) : true;
       
       let matchDept = true;
       if (budgetFilterDept) {
@@ -550,7 +554,7 @@ const App = () => {
         }
       }
       
-      return matchMonth && matchStatus && matchDept;
+      return matchMonth && matchStatus && matchDept && matchCategory;
     });
 
     // Ordenação
@@ -596,7 +600,7 @@ const App = () => {
     });
 
     return items;
-  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetSortConfig, isMaster, myManagedDepts]);
+  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetFilterCategories, budgetSortConfig, isMaster, myManagedDepts]);
 
   // Cálculo para o Gráfico e Totalizadores
   const chartData = useMemo(() => {
@@ -618,7 +622,10 @@ const App = () => {
              if (item.isConsolidated) return false;
           }
 
-          return budgetFilterStatus ? item.status === budgetFilterStatus : true;
+          // Filtro de Status e Categoria
+          const matchStatus = budgetFilterStatus ? item.status === budgetFilterStatus : true;
+          const matchCategory = budgetFilterCategories.length > 0 ? budgetFilterCategories.includes(item.categoria) : true;
+          return matchStatus && matchCategory;
       });
 
       itemsToProcess.forEach(item => {
@@ -632,7 +639,7 @@ const App = () => {
       });
 
       return data;
-  }, [budgetItems, budgetFilterDept, budgetFilterStatus, isMaster, myManagedDepts]);
+  }, [budgetItems, budgetFilterDept, budgetFilterStatus, budgetFilterCategories, isMaster, myManagedDepts]);
 
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
@@ -1404,7 +1411,7 @@ const App = () => {
                         </div>
                         
                         {/* Filtros */}
-                        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                        <div className="flex flex-wrap gap-2 w-full md:w-auto items-center">
                             <div className="relative">
                                 <Calendar size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                                 <select 
@@ -1441,10 +1448,54 @@ const App = () => {
                                     {BUDGET_STATUS.map(s => <option key={s} value={s}>{s}</option>)}
                                 </select>
                             </div>
+
+                            {/* Filtro Multi-Select de Categorias */}
+                            <div className="relative">
+                                <div 
+                                    className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all cursor-pointer flex items-center min-w-[150px] relative"
+                                    onClick={() => setIsCategoryFilterOpen(!isCategoryFilterOpen)}
+                                >
+                                    <Tag size={14} className="absolute left-3 text-slate-400"/>
+                                    <span className="truncate max-w-[120px]">
+                                        {budgetFilterCategories.length === 0 ? "Todas Categorias" : `${budgetFilterCategories.length} selecionadas`}
+                                    </span>
+                                    <ChevronDown size={14} className="absolute right-3 text-slate-400"/>
+                                </div>
+                                
+                                {isCategoryFilterOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsCategoryFilterOpen(false)}></div>
+                                        <div className="absolute top-full mt-2 left-0 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-60 overflow-y-auto p-2">
+                                            {CATEGORIES.map(cat => (
+                                                <label key={cat} className="flex items-center gap-2 p-2 hover:bg-slate-50 rounded-lg cursor-pointer">
+                                                    <input 
+                                                        type="checkbox"
+                                                        checked={budgetFilterCategories.includes(cat)}
+                                                        onChange={(e) => {
+                                                            if (e.target.checked) {
+                                                                setBudgetFilterCategories([...budgetFilterCategories, cat]);
+                                                            } else {
+                                                                setBudgetFilterCategories(budgetFilterCategories.filter(c => c !== cat));
+                                                            }
+                                                        }}
+                                                        className="rounded border-slate-300 text-[#0097A9] focus:ring-[#0097A9]"
+                                                    />
+                                                    <span className="text-xs text-slate-600">{cat}</span>
+                                                </label>
+                                            ))}
+                                        </div>
+                                    </>
+                                )}
+                            </div>
                             
-                            {(budgetFilterMonth || budgetFilterDept || budgetFilterStatus) && (
+                            {(budgetFilterMonth || budgetFilterDept || budgetFilterStatus || budgetFilterCategories.length > 0) && (
                                 <button 
-                                    onClick={() => { setBudgetFilterMonth(''); setBudgetFilterDept(''); setBudgetFilterStatus(''); }}
+                                    onClick={() => { 
+                                        setBudgetFilterMonth(''); 
+                                        setBudgetFilterDept(''); 
+                                        setBudgetFilterStatus(''); 
+                                        setBudgetFilterCategories([]);
+                                    }}
                                     className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
                                     title="Limpar Filtros"
                                 >
