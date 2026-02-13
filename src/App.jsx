@@ -83,7 +83,10 @@ import {
   deleteDoc, 
   onSnapshot,
   updateDoc,
-  getDoc
+  getDoc,
+  query,
+  where,
+  getDocs
 } from 'firebase/firestore';
 
 // Identifica se estamos no ambiente de Preview/Canvas
@@ -597,6 +600,7 @@ const App = () => {
 
   // Cálculo para o Gráfico e Totalizadores
   const chartData = useMemo(() => {
+      // 1. Array de base para os 12 meses
       const data = MONTHS.map(m => ({ mes: m, previsto: 0, realizado: 0 }));
       
       const itemsToProcess = budgetItems.filter(item => {
@@ -653,83 +657,98 @@ const App = () => {
   }, [chartData]);
 
   // --- Função para Recalcular o Consolidado ---
-  const recalculateConsolidatedItems = async (itemsSnapshot) => {
+  const recalculateConsolidatedItems = async () => {
     // Apenas Admin roda isso
     if (!isMaster) return;
+    
+    // IMPORTANTE: Busca do banco para evitar race conditions com estado local
+    try {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), where('confidencial', '==', true));
+        const querySnapshot = await getDocs(q);
+        const confidentialItems = querySnapshot.docs.map(doc => ({id: doc.id, ...doc.data()}));
 
-    // 1. Pega todos os itens confidenciais
-    const confidentialItems = itemsSnapshot.filter(i => i.confidencial && !i.isConsolidated);
-
-    // 2. Agrupa por mês
-    const byMonth = {};
-    MONTHS.forEach(m => byMonth[m] = []);
-    confidentialItems.forEach(item => {
-        if (byMonth[item.mes]) byMonth[item.mes].push(item);
-    });
-
-    // 3. Para cada mês, calcula e salva/atualiza o item consolidado
-    for (const m of MONTHS) {
-        const itemsInMonth = byMonth[m];
-        
-        // Se não tiver itens confidenciais no mês, precisamos apagar o consolidado se existir? 
-        // Sim, mas para simplificar, se o valor for 0, atualizamos para 0.
-        
-        let totalPrev = 0;
-        let totalReal = 0;
-        let deptMap = {}; // Para calcular allocations consolidadas
-
-        itemsInMonth.forEach(item => {
-            let vPrev = Number(item.valorPrevisto || 0);
-            let vReal = Number(item.valorRealizado || 0);
-            const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
-            vPrev *= rate;
-            vReal *= rate;
-
-            totalPrev += vPrev;
-            totalReal += vReal;
-
-            // Allocations
-            if (item.allocations && item.allocations.length > 0) {
-                item.allocations.forEach(alloc => {
-                    const shareVal = vPrev * (Number(alloc.percent) / 100);
-                    deptMap[alloc.department] = (deptMap[alloc.department] || 0) + shareVal;
-                });
-            } else {
-                const dept = item.departamento || 'Outros';
-                deptMap[dept] = (deptMap[dept] || 0) + vPrev;
-            }
+        // 2. Agrupa por mês
+        const byMonth = {};
+        MONTHS.forEach(m => byMonth[m] = []);
+        confidentialItems.forEach(item => {
+            if (byMonth[item.mes]) byMonth[item.mes].push(item);
         });
 
-        // Se total > 0, cria/atualiza
-        if (totalPrev > 0 || totalReal > 0) {
-             // Montar allocations array
-             const consolidatedAllocations = Object.keys(deptMap).map(dept => ({
-                 department: dept,
-                 percent: totalPrev > 0 ? (deptMap[dept] / totalPrev) * 100 : 0
-             }));
+        // 3. Para cada mês, calcula e salva/atualiza o item consolidado
+        for (const m of MONTHS) {
+            const itemsInMonth = byMonth[m];
+            
+            let totalPrev = 0;
+            let totalReal = 0;
+            let deptMap = {}; // Para calcular allocations consolidadas
 
-             const docId = `consolidated_salary_${m}`;
-             const data = {
-                 titulo: "Folha Salarial / Encargos (Consolidado)",
-                 descricao: "Item automático consolidado de salários confidenciais.",
-                 mes: m,
-                 status: "Orçado", // Padrão
-                 valorPrevisto: totalPrev,
-                 valorRealizado: totalReal,
-                 moeda: 'BRL',
-                 tipoDespesa: "Despesas com Equipe",
-                 categoria: "Salários",
-                 allocations: consolidatedAllocations,
-                 confidencial: false, // Visível para gestores!
-                 isConsolidated: true, // Flag para Admin esconder da lista
-                 updatedAt: new Date().toISOString()
-             };
-             
-             await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', docId), data);
-        } else {
-            // Se total for 0, idealmente deletaríamos o doc consolidado para não sujar.
-            // await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', `consolidated_salary_${m}`));
+            itemsInMonth.forEach(item => {
+                let vPrev = Number(item.valorPrevisto || 0);
+                let vReal = Number(item.valorRealizado || 0);
+                const rate = item.moeda === 'USD' ? FIXED_EXCHANGE_RATE : 1;
+                vPrev *= rate;
+                vReal *= rate;
+
+                totalPrev += vPrev;
+                totalReal += vReal;
+
+                // Allocations
+                if (item.allocations && item.allocations.length > 0) {
+                    item.allocations.forEach(alloc => {
+                        const shareVal = vPrev * (Number(alloc.percent) / 100);
+                        deptMap[alloc.department] = (deptMap[alloc.department] || 0) + shareVal;
+                    });
+                } else {
+                    const dept = item.departamento || 'Outros';
+                    deptMap[dept] = (deptMap[dept] || 0) + vPrev;
+                }
+            });
+
+            // Se total > 0, cria/atualiza
+            if (totalPrev > 0 || totalReal > 0) {
+                // Montar allocations array
+                const consolidatedAllocations = Object.keys(deptMap).map(dept => ({
+                    department: dept,
+                    percent: totalPrev > 0 ? (deptMap[dept] / totalPrev) * 100 : 0
+                }));
+
+                const docId = `consolidated_salary_${m}`;
+                const data = {
+                    titulo: "Folha Salarial / Encargos (Consolidado)",
+                    descricao: "Item automático consolidado de salários confidenciais.",
+                    mes: m,
+                    status: "Orçado", // Padrão
+                    valorPrevisto: totalPrev,
+                    valorRealizado: totalReal,
+                    moeda: 'BRL',
+                    tipoDespesa: "Despesas com Equipe",
+                    categoria: "Salários",
+                    allocations: consolidatedAllocations,
+                    confidencial: false, // Visível para gestores!
+                    isConsolidated: true, // Flag para Admin esconder da lista
+                    updatedAt: new Date().toISOString()
+                };
+                
+                await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', docId), data);
+            } else {
+                 // Se total zerou, devemos zerar o documento ou apagar.
+                 // Vamos zerar para manter a consistência simples
+                 const docId = `consolidated_salary_${m}`;
+                 const data = {
+                     titulo: "Folha Salarial / Encargos (Consolidado)",
+                     mes: m,
+                     valorPrevisto: 0,
+                     valorRealizado: 0,
+                     allocations: [],
+                     confidencial: false,
+                     isConsolidated: true,
+                     updatedAt: new Date().toISOString()
+                 };
+                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', docId), data);
+            }
         }
+    } catch (err) {
+        console.error("Erro no recálculo consolidado:", err);
     }
   };
 
@@ -1021,7 +1040,7 @@ const App = () => {
         // Dispara recálculo se for master (admin)
         if (isMaster) {
            // Pequeno delay para garantir que o snapshot pegou, ou usamos o updatedItems local se edição
-           setTimeout(() => recalculateConsolidatedItems(budgetItems), 1000); 
+           setTimeout(() => recalculateConsolidatedItems(), 1000); 
            // Nota: em produção ideal usaríamos Cloud Functions
         }
 
@@ -1036,7 +1055,7 @@ const App = () => {
       if (window.confirm("Remover item do orçamento?")) {
           await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'budget', id));
           // Recalcular após delete
-          if (isMaster) setTimeout(() => recalculateConsolidatedItems(budgetItems.filter(i => i.id !== id)), 1000);
+          if (isMaster) setTimeout(() => recalculateConsolidatedItems(), 1000);
       }
   };
 
@@ -1405,7 +1424,7 @@ const App = () => {
                                     onChange={(e) => setBudgetFilterDept(e.target.value)}
                                     className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
                                 >
-                                    <option value="">{isMaster ? "Todos Deptos." : "Resumo dos Meus Deptos."}</option>
+                                    <option value="">{isMaster ? "Todos Deptos." : "Meus Deptos. (Resumo)"}</option>
                                     {/* Lista todas as opções se for Master, senão lista apenas as permitidas */}
                                     {(isMaster ? DEPARTMENTS : myManagedDepts).map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
