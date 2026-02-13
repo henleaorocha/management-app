@@ -87,7 +87,8 @@ import {
   getDoc,
   query,
   where,
-  getDocs
+  getDocs,
+  writeBatch
 } from 'firebase/firestore';
 
 // Identifica se estamos no ambiente de Preview/Canvas
@@ -758,6 +759,48 @@ const App = () => {
         console.error("Erro no recálculo consolidado:", err);
     }
   };
+
+  const toggleBudgetConfidentiality = async (item) => {
+    if (!auth.currentUser || !isMaster) return;
+    try {
+      const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'budget', item.id);
+      await updateDoc(docRef, { 
+        confidencial: !item.confidencial,
+        updatedAt: new Date().toISOString()
+      });
+      // Recalcula consolidado após alteração
+      setTimeout(() => recalculateConsolidatedItems(), 1000);
+    } catch (err) {
+      console.error("Erro ao alterar confidencialidade:", err);
+    }
+  };
+
+  // --- Função Temporária para Migração via Console (Pode ser removida depois) ---
+  useEffect(() => {
+    window.runMigration = async () => {
+      if (!isMaster) return console.log("Apenas Admin pode rodar migração.");
+      const categoriasAlvo = ["Salários", "Reajustes Saláriais", "Prestador de Serviço - PJ"];
+      console.log("Iniciando varredura...");
+      const batch = writeBatch(db);
+      let count = 0;
+      for (const categoria of categoriasAlvo) {
+        const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'budget'), where('categoria', '==', categoria));
+        const snapshot = await getDocs(q);
+        snapshot.forEach((d) => {
+           if (!d.data().confidencial) {
+             const ref = doc(db, 'artifacts', appId, 'public', 'data', 'budget', d.id);
+             batch.update(ref, { confidencial: true });
+             count++;
+           }
+        });
+      }
+      if (count > 0) { await batch.commit(); console.log(`${count} itens marcados como confidenciais.`); }
+      else console.log("Nada para atualizar.");
+      
+      // Recalcular consolidado
+      recalculateConsolidatedItems();
+    };
+  }, [isMaster]);
 
   // --- Firebase Effects ---
   useEffect(() => {
@@ -1431,7 +1474,7 @@ const App = () => {
                                     onChange={(e) => setBudgetFilterDept(e.target.value)}
                                     className="pl-9 pr-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 outline-none hover:border-[#0097A9] transition-all appearance-none cursor-pointer"
                                 >
-                                    <option value="">{isMaster ? "Todos Deptos." : "Meus Deptos. (Resumo)"}</option>
+                                    <option value="">{isMaster ? "Todos Deptos." : "Meus Deptos. (Todos)"}</option>
                                     {/* Lista todas as opções se for Master, senão lista apenas as permitidas */}
                                     {(isMaster ? DEPARTMENTS : myManagedDepts).map(d => <option key={d} value={d}>{d}</option>)}
                                 </select>
@@ -1572,6 +1615,15 @@ const App = () => {
                                                 <div className="flex justify-end gap-1">
                                                     <button onClick={() => openBudgetModal(item)} className="p-2 text-slate-400 hover:text-[#0097A9] hover:bg-slate-100 rounded-lg"><Edit3 size={16}/></button>
                                                     <button onClick={() => deleteBudgetItem(item.id)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg"><Trash2 size={16}/></button>
+                                                    {isMaster && (
+                                                        <button 
+                                                            onClick={() => toggleBudgetConfidentiality(item)} 
+                                                            className={`p-2 rounded-lg ${item.confidencial ? 'text-red-500 hover:bg-red-50' : 'text-slate-400 hover:text-[#0097A9] hover:bg-slate-100'}`}
+                                                            title={item.confidencial ? "Tornar Público" : "Tornar Confidencial"}
+                                                        >
+                                                            {item.confidencial ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </td>
                                         </tr>
