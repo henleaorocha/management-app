@@ -61,7 +61,8 @@ import {
   BarChart2,
   Settings,
   PieChart as PieChartIcon,
-  Tag // Importado para o ícone de categoria
+  Tag,
+  EyeOff as EyeOffIcon // Alias para clareza
 } from 'lucide-react';
 
 // Firebase Imports
@@ -302,6 +303,7 @@ const App = () => {
   const [budgetFilterCategories, setBudgetFilterCategories] = useState([]); // Novo Filtro
   const [isCategoryFilterOpen, setIsCategoryFilterOpen] = useState(false); // Estado do dropdown
   const [budgetSortConfig, setBudgetSortConfig] = useState({ key: 'mes', direction: 'asc' });
+  const [simulateManagerView, setSimulateManagerView] = useState(false); // Nova opção para Admin
 
   // Gestão de Permissões de Orçamento
   const [deptManagers, setDeptManagers] = useState({});
@@ -537,8 +539,14 @@ const App = () => {
         }
         if (!belongsToMyDept) return false;
       } else {
-        // Admin: esconde consolidados da lista para não duplicar visualmente
-        if (item.isConsolidated) return false;
+        // Admin:
+        if (simulateManagerView) {
+            // Se simulando gestor: esconde confidenciais (exceto consolidado)
+            if (item.confidencial && !item.isConsolidated) return false;
+        } else {
+            // Se normal: esconde consolidados para não duplicar
+            if (item.isConsolidated) return false;
+        }
       }
 
       // 2. Filtros Normais de UI
@@ -601,7 +609,7 @@ const App = () => {
     });
 
     return items;
-  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetFilterCategories, budgetSortConfig, isMaster, myManagedDepts]);
+  }, [budgetItems, budgetFilterMonth, budgetFilterStatus, budgetFilterDept, budgetFilterCategories, budgetSortConfig, isMaster, myManagedDepts, simulateManagerView]);
 
   // Cálculo para o Gráfico e Totalizadores
   const chartData = useMemo(() => {
@@ -609,16 +617,21 @@ const App = () => {
       const data = MONTHS.map(m => ({ mes: m, previsto: 0, realizado: 0 }));
       
       const itemsToProcess = budgetItems.filter(item => {
-          // Segurança
-          if (!isMaster) {
+          // Segurança / Simulação
+          if (!isMaster || (isMaster && simulateManagerView)) {
             if (item.confidencial && !item.isConsolidated) return false;
             let belongsToMyDept = false;
-            if (item.allocations && item.allocations.length > 0) {
-              belongsToMyDept = item.allocations.some(a => myManagedDepts.includes(a.department));
-            } else {
-              belongsToMyDept = myManagedDepts.includes(item.departamento);
+            
+            // Se for simulação, assumimos que o Admin está vendo "como se fosse" um gestor genérico (ou seja, vê a consolidação).
+            // A restrição de departamento myManagedDepts não se aplica ao Admin no modo simulação, pois ele gerencia tudo.
+            if (!isMaster) {
+                if (item.allocations && item.allocations.length > 0) {
+                    belongsToMyDept = item.allocations.some(a => myManagedDepts.includes(a.department));
+                } else {
+                    belongsToMyDept = myManagedDepts.includes(item.departamento);
+                }
+                if (!belongsToMyDept) return false;
             }
-            if (!belongsToMyDept) return false;
           } else {
              if (item.isConsolidated) return false;
           }
@@ -640,7 +653,7 @@ const App = () => {
       });
 
       return data;
-  }, [budgetItems, budgetFilterDept, budgetFilterStatus, budgetFilterCategories, isMaster, myManagedDepts]);
+  }, [budgetItems, budgetFilterDept, budgetFilterStatus, budgetFilterCategories, isMaster, myManagedDepts, simulateManagerView]);
 
   const budgetStats = useMemo(() => {
       let totalPrevisto = 0;
@@ -653,7 +666,7 @@ const App = () => {
       });
 
       return { totalPrevisto, totalRealizado };
-  }, [filteredBudgetItems, budgetFilterDept, isMaster, myManagedDepts]);
+  }, [filteredBudgetItems, budgetFilterDept, isMaster, myManagedDepts, simulateManagerView]);
 
   const chartMaxValue = useMemo(() => {
       let max = 0;
@@ -1621,7 +1634,7 @@ const App = () => {
                                                             className={`p-2 rounded-lg ${item.confidencial ? 'text-red-500 hover:bg-red-50' : 'text-slate-400 hover:text-[#0097A9] hover:bg-slate-100'}`}
                                                             title={item.confidencial ? "Tornar Público" : "Tornar Confidencial"}
                                                         >
-                                                            {item.confidencial ? <EyeOff size={16}/> : <Eye size={16}/>}
+                                                            {item.confidencial ? <EyeOffIcon size={16}/> : <Eye size={16}/>}
                                                         </button>
                                                     )}
                                                 </div>
@@ -1644,6 +1657,31 @@ const App = () => {
                       <button onClick={() => setIsSettingsModalOpen(false)} className="hover:rotate-90 transition-transform"><X size={24}/></button>
                   </div>
                   <div className="p-8 space-y-6">
+                    {/* SEÇÃO NOVA: PREFERÊNCIAS DE VISUALIZAÇÃO */}
+                    <div className="bg-blue-50 p-6 rounded-3xl border border-blue-100">
+                        <label className="text-[10px] font-black uppercase text-blue-800 block mb-4 tracking-widest flex items-center gap-2">
+                           <Eye size={14} /> Preferências de Visualização
+                        </label>
+                        <div className="flex items-center gap-3">
+                            <input 
+                                type="checkbox"
+                                id="simulateManagerCheck"
+                                checked={simulateManagerView}
+                                onChange={(e) => setSimulateManagerView(e.target.checked)}
+                                className="w-5 h-5 accent-blue-600 cursor-pointer"
+                            />
+                            <label htmlFor="simulateManagerCheck" className="text-sm font-bold text-slate-700 cursor-pointer">
+                                Simular Visão do Gestor (Ver Consolidados)
+                            </label>
+                        </div>
+                        <p className="text-[10px] text-slate-400 mt-2 italic">
+                            Quando ativo, você verá o orçamento exatamente como um gestor: itens individuais confidenciais serão ocultos e substituídos pela linha consolidada.
+                        </p>
+                    </div>
+
+                    <div className="border-t border-slate-100 my-4"></div>
+
+                    {/* SEÇÃO ANTIGA: DEPARTAMENTOS */}
                     <div>
                       <label className="text-[10px] font-black uppercase text-slate-400 block mb-2 tracking-widest">Departamento</label>
                       <select 
